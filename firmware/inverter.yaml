@@ -55,7 +55,7 @@ wifi:
   ap:
     ssid: "inverter"
     password: "88888888"
-    ap_timeout: 2min
+    ap_timeout: 3min
 
 captive_portal:
 
@@ -306,6 +306,38 @@ interval:
           id(outages_txt).publish_state(o);
 
 
+  # Push to solarbox (standalone dashboard on the main router container).
+  - interval: 20s
+    then:
+      - if:
+          condition:
+            wifi.connected:
+          then:
+            - http_request.post:
+                url: http://192.168.88.1:8080/api/ingest
+                request_headers:
+                  Content-Type: application/json
+                json: |-
+                  root["device"] = "inverter";
+                  JsonObject m = root["metrics"].to<JsonObject>();
+                  auto put = [&](const char *k, float v) { if (!std::isnan(v)) m[k] = v; };
+                  put("ac_out_w", id(s_load).state);
+                  put("pv_w", id(s_pv).state);
+                  put("pv_v", id(s_pvv).state);
+                  put("grid_v", id(s_gv).state);
+                  put("grid_hz", id(s_gf).state);
+                  put("out_v", id(s_ov).state);
+                  put("load_pct", id(s_lp).state);
+                  put("batt_v", id(s_bv).state);
+                  put("batt_chg_a", id(s_bc).state);
+                  put("batt_dis_a", id(s_bd).state);
+                  put("temp", id(s_temp).state);
+
+http_request:
+  verify_ssl: false
+  esp8266_disable_ssl_support: true
+  timeout: 3s
+
 uart:
   id: uart_0
   baud_rate: 2400
@@ -334,8 +366,10 @@ sensor:
       id: s_gv
       name: "${name} grid_voltage"
     grid_frequency:
+      id: s_gf
       name: "${name} grid_frequency"
     ac_output_voltage:
+      id: s_ov
       name: "${name} ac_output_voltage"
     ac_output_frequency:
       name: "${name} ac_output_frequency"
@@ -345,6 +379,7 @@ sensor:
       id: s_load
       name: "${name} ac_output_active_power"
     output_load_percent:
+      id: s_lp
       name: "${name} output_load_percent"
     bus_voltage:
       name: "${name} bus_voltage"
@@ -357,10 +392,12 @@ sensor:
     battery_capacity_percent:
       name: "${name} battery_capacity_percent"
     inverter_heat_sink_temperature:
+      id: s_temp
       name: "${name} inverter_heat_sink_temperature"
     pv_input_current_for_battery:
       name: "${name} pv_input_current_for_battery"
     pv_input_voltage:
+      id: s_pvv
       name: "${name} pv_input_voltage"
     battery_voltage_scc:
       name: "${name} battery_voltage_scc"

@@ -24,8 +24,12 @@ ota:
   - platform: web_server
 
 wifi:
-  ssid: !secret wifi_ssid
-  password: !secret wifi_password
+  # Без приоритетов: ESPHome берёт самую сильную точку.
+  networks:
+    - ssid: "site"
+      password: !secret site_password
+    - ssid: !secret wifi_ssid
+      password: !secret wifi_password
   # Нет известной сети — плата поднимает свою точку, Wi-Fi выбирается с телефона.
   ap:
     ssid: "battery"
@@ -60,36 +64,50 @@ sensor:
   - platform: jk_bms_ble
     jk_bms_ble_id: bms0
     total_voltage:
+      id: b_v
       name: "Напряжение АКБ V"
     current:
+      id: b_a
       name: "Ток АКБ I"
     power:
+      id: b_w
       name: "Мощность АКБ W"
     state_of_charge:
+      id: b_soc
       name: "Заряд АКБ SOC"
     capacity_remaining:
+      id: b_cap
       name: "Остаток АКБ Ah"
     temperature_sensor_1:
+      id: b_t1
       name: "Темп АКБ T1"
     temperature_sensor_2:
+      id: b_t2
       name: "Темп АКБ T2"
     power_tube_temperature:
+      id: b_tmos
       name: "Темп MOS Tm"
     min_cell_voltage:
+      id: b_cmin
       name: "Ячейка мин Vmin"
     max_cell_voltage:
+      id: b_cmax
       name: "Ячейка макс Vmax"
     delta_cell_voltage:
+      id: b_cd
       name: "Разброс ячеек Vd"
 
 binary_sensor:
   - platform: jk_bms_ble
     jk_bms_ble_id: bms0
     charging:
+      id: b_chg
       name: "Заряжается CHG"
     discharging:
+      id: b_dsg
       name: "Разряжается DSG"
     balancing:
+      id: b_bal
       name: "Баланс BAL"
 
 text_sensor:
@@ -99,3 +117,39 @@ text_sensor:
       name: "Ошибки ERR"
     total_runtime_formatted:
       name: "Наработка RT"
+
+# Push to solarbox (standalone dashboard on the main router container).
+http_request:
+  verify_ssl: false
+  timeout: 3s
+
+interval:
+  - interval: 20s
+    then:
+      - if:
+          condition:
+            wifi.connected:
+          then:
+            - http_request.post:
+                url: http://192.168.88.1:8080/api/ingest
+                request_headers:
+                  Content-Type: application/json
+                json: |-
+                  root["device"] = "bms";
+                  JsonObject m = root["metrics"].to<JsonObject>();
+                  auto put = [&](const char *k, float v) { if (!std::isnan(v)) m[k] = v; };
+                  auto flag = [&](const char *k, binary_sensor::BinarySensor *b) { if (b->has_state()) m[k] = b->state ? 1 : 0; };
+                  put("soc", id(b_soc).state);
+                  put("bms_v", id(b_v).state);
+                  put("bms_a", id(b_a).state);
+                  put("bms_w", id(b_w).state);
+                  put("cap_ah", id(b_cap).state);
+                  put("t1", id(b_t1).state);
+                  put("t2", id(b_t2).state);
+                  put("t_mos", id(b_tmos).state);
+                  put("cell_min", id(b_cmin).state);
+                  put("cell_max", id(b_cmax).state);
+                  put("cell_delta", id(b_cd).state);
+                  flag("chg", id(b_chg));
+                  flag("dsg", id(b_dsg));
+                  flag("bal", id(b_bal));
