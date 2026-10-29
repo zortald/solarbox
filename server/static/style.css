@@ -1,0 +1,103 @@
+:root {
+  --bg: #0f1419;
+  --panel: #181f29;
+  --panel2: #1f2834;
+  --line: #2a3542;
+  --fg: #e6edf3;
+  --muted: #8b98a8;
+  --accent: #4ea3ff;
+  --ok: #3fb950;
+  --warn: #e3b341;
+  --bad: #f85149;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  font: 14px/1.4 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  background: var(--bg);
+  color: var(--fg);
+  padding-bottom: 40px;
+}
+
+header {
+  display: flex;
+  align-items: baseline;
+  gap: 14px;
+  padding: 14px 18px;
+  border-bottom: 1px solid var(--line);
+  position: sticky;
+  top: 0;
+  background: var(--bg);
+  z-index: 5;
+}
+h1 { font-size: 18px; margin: 0; letter-spacing: 0.5px; }
+.status { font-size: 12px; color: var(--muted); }
+.status.live::before { content: "● "; color: var(--ok); }
+.status.stale::before { content: "● "; color: var(--warn); }
+.status.down::before { content: "● "; color: var(--bad); }
+
+section { padding: 14px 18px; }
+
+.now {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: 10px;
+}
+.card {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 10px 12px;
+}
+.card .dev { font-size: 10px; text-transform: uppercase; color: var(--muted); letter-spacing: 0.6px; }
+.card .lbl { font-size: 12px; color: var(--muted); margin-top: 2px; }
+.card .val { font-size: 22px; font-weight: 600; margin-top: 4px; }
+.card .val .u { font-size: 13px; color: var(--muted); font-weight: 400; margin-left: 3px; }
+.card.old .val { color: var(--muted); }
+.flag-on  { color: var(--ok); }
+.flag-off { color: var(--muted); }
+
+.charts-head {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  align-items: flex-start;
+  border-top: 1px solid var(--line);
+}
+.ranges { display: flex; gap: 6px; flex-wrap: wrap; }
+.ranges button {
+  background: var(--panel);
+  color: var(--fg);
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  padding: 6px 12px;
+  cursor: pointer;
+  font-size: 13px;
+}
+.ranges button.active { background: var(--accent); border-color: var(--accent); color: #06121f; font-weight: 600; }
+
+.metrics { display: flex; gap: 6px 14px; flex-wrap: wrap; flex: 1; min-width: 200px; }
+.metrics .grp { display: flex; flex-direction: column; gap: 4px; }
+.metrics .grp > .gname { font-size: 10px; text-transform: uppercase; color: var(--muted); letter-spacing: 0.6px; }
+.metrics label { display: inline-flex; align-items: center; gap: 5px; cursor: pointer; font-size: 12px; white-space: nowrap; }
+.metrics input { accent-color: var(--accent); }
+.swatch { width: 10px; height: 10px; border-radius: 2px; display: inline-block; }
+
+.charts {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(360px, 1fr));
+  gap: 12px;
+}
+.chart {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 10px 10px 4px;
+}
+.chart .head { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 4px; }
+.chart .title { font-size: 13px; font-weight: 600; }
+.chart .cur { font-size: 13px; color: var(--muted); }
+.chart canvas { width: 100%; height: 170px; display: block; }
+.empty { color: var(--muted); padding: 20px; text-align: center; grid-column: 1 / -1; }

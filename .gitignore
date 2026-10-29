@@ -1,0 +1,15 @@
+# Rust
+/server/target/
+**/*.rs.bk
+
+# build artifacts
+/solarbox-arm64.tar
+*.tar
+
+# local databases
+*.db
+*.db-wal
+*.db-shm
+
+# os / editor
+.DS_Store

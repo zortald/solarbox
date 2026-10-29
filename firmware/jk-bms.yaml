@@ -1,0 +1,101 @@
+# Плата ESP32-C3 для JK BMS по Bluetooth.
+# Первая прошивка — базовая: Wi-Fi, точка доступа для настройки, OTA,
+# веб-страница и поиск BMS. Чтение самой BMS (syssi/esphome-jk-bms)
+# добавляется следующей прошивкой по воздуху, когда известны MAC и протокол.
+#
+#   esphome run jk-bms.yaml --device /dev/cu.usbmodem31201   # первый раз
+#   esphome run jk-bms.yaml --device jk-bms.local            # дальше OTA
+
+esphome:
+  name: jk-bms
+  friendly_name: JK BMS
+
+esp32:
+  board: esp32-c3-devkitm-1
+  framework:
+    type: esp-idf
+
+logger:
+
+api:
+
+ota:
+  - platform: esphome
+  - platform: web_server
+
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+  # Нет известной сети — плата поднимает свою точку, Wi-Fi выбирается с телефона.
+  ap:
+    ssid: "battery"
+    password: "88888888"
+
+captive_portal:
+
+web_server:
+  port: 80
+
+external_components:
+  - source: github://syssi/esphome-jk-bms@main
+    components: [jk_bms_ble]
+    refresh: 0s
+
+esp32_ble_tracker:
+
+ble_client:
+  - mac_address: 00:00:00:00:00:00
+    id: bms_client
+
+jk_bms_ble:
+  - ble_client_id: bms_client
+    id: bms0
+    protocol_version: JK02_32S
+    throttle: 5s
+
+sensor:
+  - platform: wifi_signal
+    name: "Сигнал Wi-Fi"
+    update_interval: 60s
+  - platform: jk_bms_ble
+    jk_bms_ble_id: bms0
+    total_voltage:
+      name: "Напряжение АКБ V"
+    current:
+      name: "Ток АКБ I"
+    power:
+      name: "Мощность АКБ W"
+    state_of_charge:
+      name: "Заряд АКБ SOC"
+    capacity_remaining:
+      name: "Остаток АКБ Ah"
+    temperature_sensor_1:
+      name: "Темп АКБ T1"
+    temperature_sensor_2:
+      name: "Темп АКБ T2"
+    power_tube_temperature:
+      name: "Темп MOS Tm"
+    min_cell_voltage:
+      name: "Ячейка мин Vmin"
+    max_cell_voltage:
+      name: "Ячейка макс Vmax"
+    delta_cell_voltage:
+      name: "Разброс ячеек Vd"
+
+binary_sensor:
+  - platform: jk_bms_ble
+    jk_bms_ble_id: bms0
+    charging:
+      name: "Заряжается CHG"
+    discharging:
+      name: "Разряжается DSG"
+    balancing:
+      name: "Баланс BAL"
+
+text_sensor:
+  - platform: jk_bms_ble
+    jk_bms_ble_id: bms0
+    errors:
+      name: "Ошибки ERR"
+    total_runtime_formatted:
+      name: "Наработка RT"
