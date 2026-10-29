@@ -47,7 +47,7 @@
   const when = (ts) => (ts ? new Date(ts * 1000).toLocaleString('ru') : 'ещё не было');
 
   async function load() {
-    if (!SB.isAdmin) { $('#auto').innerHTML = '<div class="empty">Автоматизации видны после входа (🔒 вверху).</div>'; $('#auto-log').innerHTML = ''; return; }
+    if (!SB.isAdmin) { $('#auto').innerHTML = '<div class="empty">Автоматизации видны после входа («Войти» в меню).</div>'; $('#auto-log').innerHTML = ''; return; }
     try {
       const d = await api('/api/automations');
       rules = d.rules; state = d.state; log = d.log;

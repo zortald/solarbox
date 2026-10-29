@@ -34,7 +34,7 @@ section { display: grid; gap: 12px; }
 .btn:hover { border-color: var(--accent); }
 .btn.on { background: var(--accent); border-color: var(--accent); color: #06121f; font-weight: 600; }
 .btn:disabled { opacity: .45; cursor: default; }
-#admin.on { border-color: var(--ok); color: var(--ok); }
+
 body:not(.admin) .adm { opacity: .5; }
 body:not(.admin) .adm-only { display: none; }
 body.admin .adm-hint { display: none; }
@@ -226,3 +226,7 @@ a.btn, nav a { text-decoration: none; }
 nav a { color: var(--muted); } nav a.on { color: var(--fg); }
 .ph a.small { font-size: 13px; white-space: nowrap; }
 .seg.two { display: grid; grid-template-columns: 1fr 1fr; }
+
+#admin.authed { background: transparent; border-color: var(--ok); color: var(--ok); }
+#admin.authed:hover { background: rgba(63,185,80,.1); }
+.adot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: var(--ok); margin-right: 7px; vertical-align: 1px; }

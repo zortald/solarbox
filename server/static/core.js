@@ -89,8 +89,8 @@ const SB = (() => {
   let isAdmin = false, controlEnabled = true;
   function renderAdmin() {
     const b = $('#admin');
-    b.textContent = isAdmin ? '🔓 Управление' : '🔒 Войти';
-    b.classList.toggle('on', isAdmin);
+    b.innerHTML = isAdmin ? '<span class="adot"></span>Управление' : 'Войти';
+    b.classList.toggle('authed', isAdmin);
     document.body.classList.toggle('admin', isAdmin);
   }
   async function login() {
@@ -113,7 +113,7 @@ const SB = (() => {
   }
   function requireAdmin() {
     if (isAdmin) return true;
-    toast('Сначала войди в режим управления (🔒 вверху)', true);
+    toast('Сначала войди в режим управления («Войти» в меню)', true);
     return false;
   }
 

@@ -58,7 +58,7 @@
 
   async function tg() {
     const el = $('#set-tg');
-    if (!SB.isAdmin) { el.innerHTML = '<p class="muted small">Настройка Telegram — после входа (🔒 вверху).</p>'; return; }
+    if (!SB.isAdmin) { el.innerHTML = '<p class="muted small">Настройка Telegram — после входа («Войти» в меню).</p>'; return; }
     let t; try { t = await api('/api/telegram'); } catch (e) { el.textContent = e.message; return; }
     el.innerHTML = `<p class="small">${t.token_set ? '✔ токен бота задан' : '✘ токен не задан'} · ${t.chat_id ? 'чат ' + esc(t.chat_id) : 'чат не указан'}</p>
       <p class="muted small">1) Создай бота у @BotFather и вставь токен. 2) Напиши своему боту <code>/id</code> — он ответит номером чата, вставь его. 3) «Отправить тест». Потом в «Автоматизациях» появится действие «Сообщение в Telegram», а боту можно писать <code>/status</code>.</p>
