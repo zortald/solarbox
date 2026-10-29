@@ -89,7 +89,12 @@
       batt = bv !== undefined ? bv * ((c ?? 0) - (d ?? 0)) : 0;
     }
     const gv = v('inverter', 'grid_v'), gridUp = gv !== undefined && gv > 150;
-    return { pv, load, batt, gv, gridUp, grid: gridUp ? Math.max(0, load + Math.max(batt, 0) - pv) : 0 };
+    // The inverter doesn't report grid power: estimate it from the balance
+    // load + battery (signed, + = charging) − PV. Discharge must count too —
+    // in SBU mode the grid is present but the battery carries the load.
+    // Small residuals are the inverter's own losses, not grid draw.
+    const g = load + batt - pv;
+    return { pv, load, batt, gv, gridUp, grid: gridUp && g > 40 ? g : 0 };
   }
 
   function render() {
@@ -171,7 +176,7 @@
     today = {
       pv: integ(pv), load: integ(load),
       chg: integ(batt, (x) => Math.max(x, 0)), dis: integ(batt, (x) => Math.max(-x, 0)),
-      grid: integ(load, (x, t) => ((G.get(t) ?? 0) > 150 ? Math.max(0, x + Math.max(B.get(t) ?? 0, 0) - (P.get(t) ?? 0)) : 0)),
+      grid: integ(load, (x, t) => { const g = x + (B.get(t) ?? 0) - (P.get(t) ?? 0); return (G.get(t) ?? 0) > 150 && g > 40 ? g : 0; }),
     };
   }
 
