@@ -37,8 +37,28 @@ boards ──POST JSON──▶ /api/ingest ──▶ SQLite ──▶ dashboard
 |-----|---------|-|
 | `SOLARBOX_DB` | `solarbox.db` | SQLite path (container: `/data/solarbox.db`) |
 | `SOLARBOX_ADDR` | `0.0.0.0:8080` | listen address |
-| `SOLARBOX_RETENTION_DAYS` | `90` | older samples pruned hourly (`0` = keep all) |
 | `SOLARBOX_TOKEN` | *(unset)* | if set, ingest requires `X-Token` |
+| `SOLARBOX_TIERS` | *(see below)* | age→resolution downsampling tiers |
+| `SOLARBOX_COMPACT_EVERY` | `6h` | how often the compaction pass runs |
+| `SOLARBOX_COMPACT_TAIL` | `2d` | lookback for the open-ended oldest tier |
+| `SOLARBOX_RETENTION_DAYS` | `0` | optional hard delete beyond compaction (`0` = keep) |
+
+## Storage: tiered downsampling
+
+Instead of deleting history, solarbox thins it by age — recent data stays
+fine-grained, old data is averaged into ever-coarser buckets (capped). Readings
+never vanish; their resolution just drops as they age, so the DB stays small
+while keeping long history. `latest` (the "now" view) is never touched.
+
+Default `SOLARBOX_TIERS` (age → bucket):
+
+```
+today 20s · 1d 1m · 2d 5m · 3d 10m · 4d 15m · 5d 20m · 6d 25m · 7d+ 30m
+# i.e. 0:20s,1d:1m,2d:5m,3d:10m,4d:15m,5d:20m,6d:25m,7d:30m
+```
+
+A compaction pass runs every `SOLARBOX_COMPACT_EVERY`; `POST /api/compact`
+forces one. The pass is idempotent — a band already on its grid is skipped.
 
 ## Build / run
 

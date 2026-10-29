@@ -116,6 +116,74 @@ pub fn series(
 }
 
 /// Delete samples older than `cutoff` (unix seconds). `latest` is untouched.
+/// Optional hard cap; the tiered compaction below is the primary size control.
 pub fn prune(conn: &Connection, cutoff: i64) -> rusqlite::Result<usize> {
     conn.execute("DELETE FROM samples WHERE ts < ?1", params![cutoff])
+}
+
+/// One age tier: samples at least `min_age` seconds old are stored at `res`
+/// (seconds) resolution. Tiers are sorted ascending by `min_age`; each tier
+/// owns the band from its own `min_age` up to the next tier's `min_age`.
+#[derive(Clone, Debug)]
+pub struct Tier {
+    pub min_age: i64,
+    pub res: i64,
+}
+
+/// Downsample `samples` in place so older data is thinned to coarser buckets.
+///
+/// For each tier, samples in its age band are averaged into fixed `res`-second
+/// buckets, replacing the finer rows. The newest tier typically keeps near-raw
+/// resolution; the oldest is capped. Idempotent — a band already aligned to its
+/// resolution is detected and skipped, so repeated runs don't churn the file.
+///
+/// The oldest (open-ended) tier is only re-examined back to `tail` seconds
+/// beyond its boundary: anything older was already collapsed when it passed
+/// through, so there is no need to rewrite the whole history each run.
+pub fn compact(conn: &mut Connection, tiers: &[Tier], now: i64, tail: i64) -> rusqlite::Result<usize> {
+    let mut total = 0usize;
+    for (i, t) in tiers.iter().enumerate() {
+        if t.res <= 1 {
+            continue;
+        }
+        let hi = now - t.min_age; // newer edge of this band (inclusive)
+        let lo = if i + 1 < tiers.len() {
+            now - tiers[i + 1].min_age // older edge = next tier's boundary
+        } else {
+            now - (t.min_age + tail.max(0)) // open-ended tier: bounded tail
+        };
+        if lo >= hi {
+            continue;
+        }
+        // Anything not already on the bucket grid means the band needs work.
+        let needs: bool = conn.query_row(
+            "SELECT EXISTS(SELECT 1 FROM samples WHERE ts > ?1 AND ts <= ?2 AND ts % ?3 != 0)",
+            params![lo, hi, t.res],
+            |r| r.get(0),
+        )?;
+        if !needs {
+            continue;
+        }
+        let tx = conn.transaction()?;
+        tx.execute(
+            "CREATE TEMP TABLE IF NOT EXISTS _roll(bts INTEGER, device TEXT, metric TEXT, v REAL)",
+            [],
+        )?;
+        tx.execute("DELETE FROM _roll", [])?;
+        tx.execute(
+            "INSERT INTO _roll
+             SELECT (ts / ?3) * ?3 AS bts, device, metric, AVG(value)
+             FROM samples WHERE ts > ?1 AND ts <= ?2
+             GROUP BY device, metric, (ts / ?3) * ?3",
+            params![lo, hi, t.res],
+        )?;
+        tx.execute("DELETE FROM samples WHERE ts > ?1 AND ts <= ?2", params![lo, hi])?;
+        let n = tx.execute(
+            "INSERT INTO samples(ts, device, metric, value) SELECT bts, device, metric, v FROM _roll",
+            [],
+        )?;
+        tx.commit()?;
+        total += n;
+    }
+    Ok(total)
 }
