@@ -175,7 +175,8 @@
   // ---- one combined chart; legend checkboxes hide series (remembered) ----
   const CHART = [
     { k: 'pv', d: 'inverter', m: 'pv_w', label: 'Солнце', unit: 'Вт', color: '#f5b041' },
-    { k: 'load', d: 'inverter', m: 'ac_out_w', label: 'Дом', unit: 'Вт', color: '#ff9eb5' },
+    { k: 'load', d: 'inverter', m: 'ac_out_w', label: 'Дом', unit: 'Вт', color: '#ff9eb5',
+      offGrid: { color: '#a3e635', label: 'Дом от АКБ', legend: 'без света' } },
     { k: 'batt', d: 'bms', m: 'bms_w', label: 'АКБ ±', unit: 'Вт', color: '#3fb950' },
     { k: 'soc', d: 'bms', m: 'soc', label: 'Заряд АКБ', unit: '%', color: '#56d4dd', axis: 'right', fixed: [0, 100] },
   ];
@@ -194,7 +195,8 @@
       period = b.dataset.p; store('sbFlowPeriod', period); controls(); chartsAt = 0; charts();
     }));
     $('#fc-legend').innerHTML = CHART.map((c) => `<label><input type="checkbox" data-k="${c.k}"${hidden.has(c.k) ? '' : ' checked'}>` +
-      `<i style="background:${c.color}"></i>${c.label}${c.axis === 'right' ? ' (правая шкала)' : ''}</label>`).join('');
+      `<i style="background:${c.color}"></i>${c.label}${c.axis === 'right' ? ' (правая шкала)' : ''}` +
+      (c.offGrid ? `<i style="background:${c.offGrid.color};margin-left:6px"></i>${c.offGrid.legend}` : '') + `</label>`).join('');
     document.querySelectorAll('#fc-legend input').forEach((i) => (i.onchange = () => {
       i.checked ? hidden.delete(i.dataset.k) : hidden.add(i.dataset.k);
       store('sbFlowHidden', [...hidden]);
@@ -214,10 +216,12 @@
       }));
       for (const c of CHART) if (hidden.has(c.k)) delete cache[c.k];
     }
+    const outages = (out_()?.items || []).map((o) => ({ from: o.start, to: o.end ?? Math.floor(Date.now() / 1000) }));
     Plot($('#fc-chart'), {
       from, to,
-      bands: (out_()?.items || []).map((o) => ({ from: o.start, to: o.end ?? Math.floor(Date.now() / 1000) })),
-      series: CHART.filter((c) => !hidden.has(c.k) && cache[c.k]).map((c) => ({ ...cache[c.k], color: c.color, label: c.label, unit: c.unit, axis: c.axis, fixed: c.fixed })),
+      bands: outages,
+      series: CHART.filter((c) => !hidden.has(c.k) && cache[c.k]).map((c) => ({ ...cache[c.k], color: c.color, label: c.label, unit: c.unit, axis: c.axis, fixed: c.fixed,
+        alt: c.offGrid && { ranges: outages, color: c.offGrid.color, label: c.offGrid.label } })),
     });
   }
 

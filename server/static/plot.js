@@ -2,7 +2,10 @@
 //
 // Plot(canvas, { series, unit, from, to, bands })
 //   bands: [{ from, to, color? }] — shaded time ranges (e.g. power outages)
-//   series: [{ ts:[], v:[], color, label, unit?, axis?: 'right', fixed?: [min, max] }]
+//   series: [{ ts:[], v:[], color, label, unit?, axis?: 'right', fixed?: [min, max],
+//             alt?: { ranges: [{ from, to }], color, label? } }]
+//     alt: the line is drawn in alt.color inside these time ranges (e.g. house
+//     load during an outage, when it came from the battery).
 //   from/to: the selected period — the x-axis always spans it, so short history
 //            sits where it belongs instead of being stretched.
 // Left-axis series share one scale; 'right' series get their own (labels on the
@@ -139,13 +142,30 @@
       }
       for (const s of series) {
         const y = yOf(s), gap = gapLimit(s);
-        ctx.strokeStyle = s.color || '#4ea3ff'; ctx.lineWidth = 1.6; ctx.lineJoin = 'round';
-        ctx.beginPath();
-        for (let i = 0; i < s.ts.length; i++) {
-          const px = x(s.ts[i]), py = y(s.v[i]);
-          i && s.ts[i] - s.ts[i - 1] <= gap ? ctx.lineTo(px, py) : ctx.moveTo(px, py);
+        const path = () => {
+          ctx.beginPath();
+          for (let i = 0; i < s.ts.length; i++) {
+            const px = x(s.ts[i]), py = y(s.v[i]);
+            i && s.ts[i] - s.ts[i - 1] <= gap ? ctx.lineTo(px, py) : ctx.moveTo(px, py);
+          }
+        };
+        ctx.lineWidth = 1.6; ctx.lineJoin = 'round';
+        const alt = (s.alt?.ranges || []).map((r) => [x(Math.max(r.from, t0)), x(Math.min(r.to, t1))]).filter(([a, z]) => z > a);
+        // Normal colour everywhere except the alt ranges, alt colour inside them.
+        ctx.save();
+        if (alt.length) {
+          ctx.beginPath(); ctx.rect(0, 0, W, H);
+          for (const [a, z] of alt) ctx.rect(a, 0, z - a, H);
+          ctx.clip('evenodd');
         }
-        ctx.stroke();
+        ctx.strokeStyle = s.color || '#4ea3ff'; path(); ctx.stroke();
+        ctx.restore();
+        if (alt.length) {
+          ctx.save();
+          ctx.beginPath(); for (const [a, z] of alt) ctx.rect(a, 0, z - a, H); ctx.clip();
+          ctx.strokeStyle = s.alt.color; path(); ctx.stroke();
+          ctx.restore();
+        }
       }
       ctx.restore();
       if (!series.length) {
@@ -163,9 +183,11 @@
         let j = 0;
         for (let i = 1; i < s.ts.length; i++) if (Math.abs(s.ts[i] - t) < Math.abs(s.ts[j] - t)) j = i;
         if (Math.abs(s.ts[j] - t) > gapLimit(s)) continue; // no data near the cursor
-        ctx.fillStyle = s.color || '#4ea3ff';
+        const inAlt = s.alt?.ranges?.some((r) => s.ts[j] >= r.from && s.ts[j] <= r.to);
+        const color = inAlt ? s.alt.color : s.color, label = inAlt && s.alt.label ? s.alt.label : s.label;
+        ctx.fillStyle = color || '#4ea3ff';
         ctx.beginPath(); ctx.arc(x(s.ts[j]), yOf(s)(s.v[j]), 3, 0, Math.PI * 2); ctx.fill();
-        rows.push({ color: s.color, text: `${s.label ? s.label + ': ' : ''}${fmtVal(s.v[j])} ${unitOf(s)}`, ts: s.ts[j] });
+        rows.push({ color, text: `${label ? label + ': ' : ''}${fmtVal(s.v[j])} ${unitOf(s)}`, ts: s.ts[j] });
       }
       ctx.strokeStyle = colMuted; ctx.lineWidth = 1;
       ctx.beginPath(); ctx.moveTo(mx, PAD.t); ctx.lineTo(mx, PAD.t + plotH); ctx.stroke();
