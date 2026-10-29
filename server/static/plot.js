@@ -1,6 +1,7 @@
 // Minimal dependency-free time-series chart on a <canvas>.
 //
-// Plot(canvas, { series, unit, from, to })
+// Plot(canvas, { series, unit, from, to, bands })
+//   bands: [{ from, to, color? }] — shaded time ranges (e.g. power outages)
 //   series: [{ ts:[], v:[], color, label, unit?, axis?: 'right', fixed?: [min, max] }]
 //   from/to: the selected period — the x-axis always spans it, so short history
 //            sits where it belongs instead of being stretched.
@@ -129,9 +130,13 @@
         ctx.beginPath(); ctx.moveTo(x(now), PAD.t); ctx.lineTo(x(now), PAD.t + plotH); ctx.stroke();
         ctx.setLineDash([]);
       }
-      // lines
+      // lines (and shaded bands under them)
       ctx.save();
       ctx.beginPath(); ctx.rect(PAD.l, PAD.t - 2, plotW, plotH + 4); ctx.clip();
+      for (const b of opts.bands || []) {
+        const a = x(Math.max(b.from, t0)), z = x(Math.min(b.to, t1));
+        if (z > a) { ctx.fillStyle = b.color || 'rgba(248,81,73,0.14)'; ctx.fillRect(a, PAD.t, Math.max(z - a, 1.5), plotH); }
+      }
       for (const s of series) {
         const y = yOf(s), gap = gapLimit(s);
         ctx.strokeStyle = s.color || '#4ea3ff'; ctx.lineWidth = 1.6; ctx.lineJoin = 'round';

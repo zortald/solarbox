@@ -11,6 +11,7 @@ mod config;
 mod db;
 mod files;
 mod ota;
+mod outages;
 mod sysinfo;
 mod telegram;
 
@@ -56,13 +57,15 @@ struct AppState {
     /// Automation rules + their runtime state and journal.
     autom: Arc<automations::Engine>,
     tg: Arc<telegram::Store>,
+    /// Power outage detector (grid voltage on inverter packets).
+    outages: Arc<outages::Detector>,
 }
 
 #[derive(RustEmbed)]
 #[folder = "static/"]
 struct Assets;
 
-fn now() -> i64 {
+pub(crate) fn now() -> i64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap()
@@ -86,6 +89,7 @@ async fn main() {
     let max_db: i64 = env("SOLARBOX_MAX_DB_MB", "40").parse::<i64>().unwrap_or(40).max(5) * 1_048_576;
 
     let conn = db::open(&db_path).expect("open database");
+    let outage_detector = Arc::new(outages::Detector::open(&conn).expect("outages"));
     let db = Arc::new(Mutex::new(conn));
     let tiers = Arc::new(tiers);
     let state = AppState {
@@ -106,6 +110,7 @@ async fn main() {
         bus: tokio::sync::broadcast::channel(64).0,
         autom: Arc::new(automations::Engine::open(PathBuf::from(env("SOLARBOX_AUTOMATIONS", "/data/automations.json")))),
         tg: Arc::new(telegram::Store::open(PathBuf::from(env("SOLARBOX_SECRETS", "/data/secrets.json")))),
+        outages: outage_detector,
     };
     telegram::spawn_bot(state.clone());
     {
@@ -171,6 +176,8 @@ async fn main() {
         .route("/api/latest", get(latest))
         .route("/api/series", get(series))
         .route("/api/stream", get(stream))
+        .route("/api/outages", get(outages::list))
+        .route("/api/outages/import", post(outages_import))
         .route("/api/catalog", get(catalog))
         .route("/api/compact", post(compact_now))
         .route("/api/boards", get(boards::list))
@@ -253,6 +260,16 @@ async fn ingest(State(st): State<AppState>, headers: HeaderMap, Json(body): Json
             match db::insert(&mut c, &it.device, ts, &it.metrics) {
                 Ok(n) => {
                     stored += n;
+                    if it.device == "inverter" {
+                        if let Some(gv) = it.metrics.get("grid_v") {
+                            match st.outages.feed(&c, ts, *gv, st.autom.value("bms", "soc")) {
+                                Ok(Some(true)) => eprintln!("[outages] grid lost"),
+                                Ok(Some(false)) => eprintln!("[outages] grid back"),
+                                Ok(None) => {}
+                                Err(e) => eprintln!("[outages] {e}"),
+                            }
+                        }
+                    }
                     // Nobody listening is fine (send only fails without receivers).
                     let _ = st.bus.send(
                         serde_json::json!({ "device": it.device, "ts": ts, "metrics": it.metrics }).to_string(),
@@ -428,6 +445,16 @@ async fn tg_test(State(st): State<AppState>, h: HeaderMap) -> Response {
     match telegram::send(&st, "✅ solarbox на связи".into()).await {
         Ok(_) => Json(serde_json::json!({ "ok": true })).into_response(),
         Err(e) => (StatusCode::BAD_GATEWAY, Json(serde_json::json!({ "ok": false, "error": e }))).into_response(),
+    }
+}
+
+/// Admin: add past outages `[[start, secs], ...]` (e.g. from the board's log).
+async fn outages_import(State(st): State<AppState>, h: HeaderMap, Json(items): Json<Vec<(i64, i64)>>) -> Response {
+    if !admin_header(&st, &h) { return need_admin(); }
+    let r = { let c = st.db.lock().unwrap(); outages::import(&c, &items) };
+    match r {
+        Ok(n) => Json(serde_json::json!({ "ok": true, "added": n })).into_response(),
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({ "ok": false, "error": e.to_string() }))).into_response(),
     }
 }
 

@@ -107,7 +107,7 @@
     // grid
     set('fv-grid', p.gridUp ? '≈ ' + W(p.grid) : 'нет');
     set('fe-grid', kwh(E.grid));
-    set('fg-1', p.gridUp ? num(p.gv, 0) + ' V' : 'сети нет');
+    set('fg-1', p.gridUp ? num(p.gv, 0) + ' V' : out?.current ? 'нет ' + span(Date.now() / 1000 - out.current.start) : 'сети нет');
     set('fg-2', p.gridUp ? num(v('inverter', 'grid_hz'), 1) + ' Hz' : '');
     document.getElementById('grid-x').style.display = p.gridUp ? 'none' : '';
     document.getElementById('fi-grid').classList.toggle('off', !p.gridUp);
@@ -154,6 +154,31 @@
       ['Заряд / разряд (инв.)', num(v('inverter', 'batt_chg_a'), 0) + ' / ' + num(v('inverter', 'batt_dis_a'), 0) + ' А'],
     ];
     $('#flow-facts').innerHTML = rows.map(([k, x]) => `<div><span>${k}</span><b>${x}</b></div>`).join('');    SB.cellTiles?.($('#flow-cells'));
+  }
+
+  // ---- power outages (server-tracked) ----
+  let out = null, outAt = 0;
+  const midnightTs = () => { const d = new Date(); d.setHours(0, 0, 0, 0); return Math.floor(d / 1000); };
+  const span = (s) => s < 60 ? Math.round(s) + ' с' : s < 3600 ? Math.round(s / 60) + ' мин' : s < 86400 ? `${Math.floor(s / 3600)} ч ${Math.round((s % 3600) / 60)} мин` : `${Math.floor(s / 86400)} д ${Math.round((s % 86400) / 3600)} ч`;
+  const hhmm = (t) => { const d = new Date(t * 1000), p = (x) => String(x).padStart(2, '0'); const today = t >= midnightTs(); return (today ? '' : `${p(d.getDate())}.${p(d.getMonth() + 1)} `) + `${p(d.getHours())}:${p(d.getMinutes())}`; };
+  async function outages(force) {
+    if (!force && Date.now() - outAt < 30000) return;
+    outAt = Date.now();
+    try { out = await api(`/api/outages?midnight=${midnightTs()}`); } catch (e) { return; }
+    renderOutages();
+  }
+  function renderOutages() {
+    const el = $('#flow-outages'); if (!el || !out) return;
+    const cur = out.current, now = Date.now() / 1000;
+    const tile = (k, w) => `<div><span>${k}</span><b>${w.count} раз</b><i>${w.count ? span(w.secs) + (w.longest ? ' · макс ' + span(w.longest) : '') : 'без отключений'}</i></div>`;
+    const soc = (a, b) => (a != null ? Math.round(a) + '%' : '—') + ' → ' + (b != null ? Math.round(b) + '%' : '…');
+    el.innerHTML = `<h2>Отключения света</h2>
+      <div class="ostat">${cur ? `<span class="dot bad"></span><b>Света нет ${span(now - cur.start)}</b><span class="muted">с ${hhmm(cur.start)}</span>`
+        : `<span class="dot ok"></span><b>Свет есть</b>${out.items[0] ? `<span class="muted">последнее отключение ${hhmm(out.items[0].start)}</span>` : ''}`}</div>
+      <div class="otiles">${tile('Сегодня', out.today)}${tile('7 дней', out.d7)}${tile('30 дней', out.d30)}</div>
+      ${out.items.length ? `<table class="olist">${out.items.slice(0, 8).map((o) => `<tr><td>${hhmm(o.start)} – ${o.end ? hhmm(o.end) : 'сейчас'}</td><td>${span(o.secs)}</td><td>АКБ ${soc(o.soc_start, o.soc_end)}</td></tr>`).join('')}</table>`
+        : '<p class="muted small">За 30 дней отключений не было.</p>'}
+      <p class="muted small">Отключение — сеть ниже ${out.thresholds.low} В дольше ${out.thresholds.hold_s} с; закончилось — выше ${out.thresholds.high} В.</p>`;
   }
 
   // ---- today's energy, integrated from history (refreshed every 2 min) ----
@@ -224,6 +249,7 @@
     }
     Plot($('#fc-chart'), {
       from, to,
+      bands: (out?.items || []).map((o) => ({ from: o.start, to: o.end ?? Math.floor(Date.now() / 1000) })),
       series: CHART.filter((c) => !hidden.has(c.k) && cache[c.k]).map((c) => ({ ...cache[c.k], color: c.color, label: c.label, unit: c.unit, axis: c.axis, fixed: c.fixed })),
     });
   }
@@ -232,7 +258,7 @@
   window.addEventListener('resize', () => { clearTimeout(resized); resized = setTimeout(() => { if (!$('#page-flow').hidden) { chartsAt = 0; charts(); } }, 200); });
 
   page('flow', {
-    show() { controls(); chartsAt = 0; todayAt = 0; },
-    async tick() { render(); await energy(); render(); charts(); },
+    show() { controls(); chartsAt = 0; todayAt = 0; outAt = 0; },
+    async tick() { render(); await energy(); await outages(); render(); charts(); },
   });
 })();

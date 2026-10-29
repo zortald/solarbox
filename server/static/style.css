@@ -161,3 +161,15 @@ details summary { cursor: pointer; color: var(--muted); }
 canvas.xtall { height: 280px; }
 .legend.toggles label { display: inline-flex; align-items: center; gap: 4px; cursor: pointer; user-select: none; }
 .legend.toggles input { accent-color: var(--accent); margin: 0; }
+
+/* outages */
+.ostat { display: flex; align-items: baseline; gap: 8px; margin-bottom: 10px; flex-wrap: wrap; }
+.ostat b { font-size: 16px; }
+.otiles { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-bottom: 10px; }
+.otiles div { background: var(--panel2); border: 1px solid var(--line); border-radius: 10px; padding: 6px 8px; }
+.otiles span { display: block; font-size: 11px; color: var(--muted); }
+.otiles b { font-size: 15px; }
+.otiles i { display: block; font-style: normal; font-size: 11px; color: var(--muted); }
+.olist { width: 100%; border-collapse: collapse; font-size: 12px; font-variant-numeric: tabular-nums; }
+.olist td { padding: 4px 4px; border-top: 1px solid var(--line); }
+.olist td:last-child { text-align: right; color: var(--muted); }
