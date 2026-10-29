@@ -86,8 +86,11 @@ const SB = (() => {
   }
 
   // ---- admin login ----
-  let isAdmin = false, controlEnabled = true;
+  let isAdmin = false, controlEnabled = true, shownAdmin = false;
   function renderAdmin() {
+    // Pages that show admin-only panels render them on show(); redo that when
+    // the login state changes while the page is open.
+    if (shownAdmin !== isAdmin) { shownAdmin = isAdmin; pages[current]?.hide?.(); pages[current]?.show?.(); }
     const b = $('#admin');
     b.innerHTML = isAdmin ? '<span class="adot"></span>Управление' : 'Войти';
     b.classList.toggle('authed', isAdmin);
