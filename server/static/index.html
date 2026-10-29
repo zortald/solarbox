@@ -19,6 +19,7 @@
       <a href="#cells">АКБ</a>
       <a href="#inverter">Инвертор</a>
       <a href="#boards">Платы</a>
+      <a href="#outages">Отключения</a>
       <a href="#history">История</a>
       <a href="#automations">Автоматизации</a>
       <a href="#settings">Настройки</a>
@@ -34,7 +35,6 @@
         <div class="flowside">
           <div class="panel" id="flow-cells"></div>
           <div class="panel facts" id="flow-facts"></div>
-          <div class="panel" id="flow-outages"></div>
         </div>
       </div>
       <div class="panel">
@@ -77,6 +77,10 @@
       <div class="panel"><div class="row" id="h-ranges"></div><div id="h-metrics"></div></div>
       <div id="h-charts"></div>
     </section>
+    <section data-page="outages" id="page-outages" hidden>
+      <div id="outages"></div>
+    </section>
+
     <section data-page="automations" id="page-automations" hidden>
       <div class="panel"><h2>Правила</h2><div id="auto"></div></div>
       <div class="panel"><h2>Журнал</h2><div id="auto-log"></div></div>
@@ -96,6 +100,7 @@
 
   <script src="/plot.js"></script>
   <script src="/core.js"></script>
+  <script src="/outages.js"></script>
   <script src="/flow.js"></script>
   <script src="/cells.js"></script>
   <script src="/inverter.js"></script>
