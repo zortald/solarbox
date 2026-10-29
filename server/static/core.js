@@ -141,6 +141,9 @@ const SB = (() => {
     document.querySelectorAll('main > section[data-page]').forEach((s) => (s.hidden = s.dataset.page !== target));
     document.querySelectorAll('nav a').forEach((a) => a.classList.toggle('on', a.getAttribute('href') === '#' + target));
     current = target;
+    const link = document.querySelector(`nav a[href="#${target}"]`);
+    $('#page-title').textContent = link ? ' · ' + link.textContent : '';
+    $('#nav').classList.remove('open');
     pages[target]?.show?.();
     pages[target]?.tick?.();
   }
@@ -154,7 +157,10 @@ const SB = (() => {
   }
 
   async function start() {
-    $('#admin').onclick = login;
+    $('#admin').onclick = () => { $('#nav').classList.remove('open'); login(); };
+    $('#menu-btn').onclick = () => $('#nav').classList.toggle('open');
+    $('#nav-shade').onclick = () => $('#nav').classList.remove('open');
+    document.querySelectorAll('nav a').forEach((a) => (a.onclick = () => $('#nav').classList.remove('open')));
     window.addEventListener('hashchange', go);
     await loadConfig();
     checkAdmin();

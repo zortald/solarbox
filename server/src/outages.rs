@@ -120,6 +120,17 @@ impl Detector {
         Ok(None)
     }
 
+    /// Delete the outage that started at `start` (forgets it if it's the open one).
+    pub fn delete(&self, conn: &Connection, start: i64) -> rusqlite::Result<usize> {
+        let n = conn.execute("DELETE FROM outages WHERE start = ?1", params![start])?;
+        let mut s = self.s.lock().unwrap();
+        if s.open.is_some_and(|(_, st)| st == start) {
+            s.open = None;
+            s.above_since = None;
+        }
+        Ok(n)
+    }
+
     pub fn current_start(&self) -> Option<i64> {
         self.s.lock().unwrap().open.map(|(_, s)| s)
     }

@@ -102,7 +102,11 @@ pub struct Engine {
     path: PathBuf,
     inner: Mutex<Inner>,
     log: Mutex<VecDeque<LogEntry>>,
+    /// When attached, the journal is kept in SQLite (survives restarts).
+    db: Mutex<Option<std::sync::Arc<Mutex<rusqlite::Connection>>>>,
 }
+
+const LOG_KEEP: i64 = 500;
 
 fn now_ts() -> i64 {
     SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).map(|d| d.as_secs() as i64).unwrap_or(0)
@@ -149,6 +153,7 @@ impl Engine {
             path,
             inner: Mutex::new(Inner { rules: vec![], state: HashMap::new(), values: HashMap::new(), mtime: None, load_error: None }),
             log: Mutex::new(VecDeque::new()),
+            db: Mutex::new(None),
         };
         e.reload_if_changed();
         e
@@ -190,21 +195,55 @@ impl Engine {
         Ok(rules.len())
     }
 
+    /// Keep the journal in the database from now on.
+    pub fn attach_db(&self, db: std::sync::Arc<Mutex<rusqlite::Connection>>) {
+        if let Err(e) = db.lock().unwrap().execute_batch(
+            "CREATE TABLE IF NOT EXISTS auto_log(id INTEGER PRIMARY KEY, ts INTEGER NOT NULL, rule TEXT NOT NULL, msg TEXT NOT NULL);",
+        ) {
+            eprintln!("[auto] journal table: {e}");
+            return;
+        }
+        *self.db.lock().unwrap() = Some(db);
+    }
+
     pub fn log(&self, rule: &str, msg: impl Into<String>) {
         let msg = msg.into();
         eprintln!("[auto] {rule}: {msg}");
+        let entry = LogEntry { ts: now_ts(), rule: rule.to_string(), msg };
+        if let Some(db) = self.db.lock().unwrap().as_ref() {
+            let c = db.lock().unwrap();
+            let r = c
+                .execute("INSERT INTO auto_log(ts, rule, msg) VALUES(?1, ?2, ?3)", rusqlite::params![entry.ts, entry.rule, entry.msg])
+                .and_then(|_| c.execute("DELETE FROM auto_log WHERE id <= (SELECT MAX(id) FROM auto_log) - ?1", [LOG_KEEP]));
+            if let Err(e) = r {
+                eprintln!("[auto] journal: {e}");
+            }
+            return;
+        }
         let mut l = self.log.lock().unwrap();
-        l.push_front(LogEntry { ts: now_ts(), rule: rule.to_string(), msg });
+        l.push_front(entry);
         l.truncate(200);
     }
 
+    fn journal(&self) -> Vec<LogEntry> {
+        if let Some(db) = self.db.lock().unwrap().as_ref() {
+            let c = db.lock().unwrap();
+            let rows = c.prepare("SELECT ts, rule, msg FROM auto_log ORDER BY id DESC LIMIT 200").and_then(|mut st| {
+                st.query_map([], |r| Ok(LogEntry { ts: r.get(0)?, rule: r.get(1)?, msg: r.get(2)? }))?.collect()
+            });
+            return rows.unwrap_or_default();
+        }
+        self.log.lock().unwrap().iter().cloned().collect()
+    }
+
     pub fn snapshot(&self) -> serde_json::Value {
+        let log = self.journal();
         let g = self.inner.lock().unwrap();
         serde_json::json!({
             "rules": g.rules,
             "state": g.state,
             "load_error": g.load_error,
-            "log": *self.log.lock().unwrap(),
+            "log": log,
         })
     }
 

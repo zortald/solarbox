@@ -112,6 +112,7 @@ async fn main() {
         tg: Arc::new(telegram::Store::open(PathBuf::from(env("SOLARBOX_SECRETS", "/data/secrets.json")))),
         outages: outage_detector,
     };
+    state.autom.attach_db(db.clone());
     telegram::spawn_bot(state.clone());
     {
         // Hold times / staleness need a clock even without new packets.
@@ -178,6 +179,7 @@ async fn main() {
         .route("/api/stream", get(stream))
         .route("/api/outages", get(outages::list))
         .route("/api/outages/import", post(outages_import))
+        .route("/api/outages/:start", axum::routing::delete(outages_delete))
         .route("/api/catalog", get(catalog))
         .route("/api/compact", post(compact_now))
         .route("/api/boards", get(boards::list))
@@ -454,6 +456,16 @@ async fn outages_import(State(st): State<AppState>, h: HeaderMap, Json(items): J
     let r = { let c = st.db.lock().unwrap(); outages::import(&c, &items) };
     match r {
         Ok(n) => Json(serde_json::json!({ "ok": true, "added": n })).into_response(),
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({ "ok": false, "error": e.to_string() }))).into_response(),
+    }
+}
+
+/// Admin: remove an outage (e.g. a deliberate test) by its start timestamp.
+async fn outages_delete(State(st): State<AppState>, Path(start): Path<i64>, h: HeaderMap) -> Response {
+    if !admin_header(&st, &h) { return need_admin(); }
+    let r = { let c = st.db.lock().unwrap(); st.outages.delete(&c, start) };
+    match r {
+        Ok(n) => Json(serde_json::json!({ "ok": true, "deleted": n })).into_response(),
         Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({ "ok": false, "error": e.to_string() }))).into_response(),
     }
 }

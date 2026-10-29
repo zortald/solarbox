@@ -176,9 +176,15 @@
       <div class="ostat">${cur ? `<span class="dot bad"></span><b>Света нет ${span(now - cur.start)}</b><span class="muted">с ${hhmm(cur.start)}</span>`
         : `<span class="dot ok"></span><b>Свет есть</b>${out.items[0] ? `<span class="muted">последнее отключение ${hhmm(out.items[0].start)}</span>` : ''}`}</div>
       <div class="otiles">${tile('Сегодня', out.today)}${tile('7 дней', out.d7)}${tile('30 дней', out.d30)}</div>
-      ${out.items.length ? `<table class="olist">${out.items.slice(0, 8).map((o) => `<tr><td>${hhmm(o.start)} – ${o.end ? hhmm(o.end) : 'сейчас'}</td><td>${span(o.secs)}</td><td>АКБ ${soc(o.soc_start, o.soc_end)}</td></tr>`).join('')}</table>`
+      ${out.items.length ? `<table class="olist">${out.items.slice(0, 8).map((o) => `<tr><td>${hhmm(o.start)} – ${o.end ? hhmm(o.end) : 'сейчас'}</td><td>${span(o.secs)}</td><td>АКБ ${soc(o.soc_start, o.soc_end)}</td>` +
+        `<td class="adm-only"><button class="btn xs" data-odel="${o.start}" title="Убрать из учёта (например, тест)">✕</button></td></tr>`).join('')}</table>`
         : '<p class="muted small">За 30 дней отключений не было.</p>'}
       <p class="muted small">Отключение — сеть ниже ${out.thresholds.low} В дольше ${out.thresholds.hold_s} с; закончилось — выше ${out.thresholds.high} В.</p>`;
+    el.querySelectorAll('[data-odel]').forEach((b) => (b.onclick = async () => {
+      if (!SB.requireAdmin() || !confirm(`Убрать отключение ${hhmm(+b.dataset.odel)} из учёта?`)) return;
+      try { await api('/api/outages/' + b.dataset.odel, { method: 'DELETE' }); SB.toast('Убрано'); outages(true); chartsAt = 0; charts(); }
+      catch (e) { SB.toast(e.message, true); }
+    }));
   }
 
   // ---- today's energy, integrated from history (refreshed every 2 min) ----

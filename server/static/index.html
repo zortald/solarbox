@@ -10,11 +10,11 @@
 <body>
   <header>
     <div class="top">
-      <h1>solarbox</h1>
+      <button id="menu-btn" class="burger" aria-label="Меню">☰</button>
+      <h1>solarbox<span id="page-title"></span></h1>
       <div id="status" class="status">…</div>
-      <button id="admin" class="btn">🔒 Войти</button>
     </div>
-    <nav>
+    <nav id="nav">
       <a href="#flow">Потоки</a>
       <a href="#cells">АКБ</a>
       <a href="#inverter">Инвертор</a>
@@ -22,7 +22,9 @@
       <a href="#history">История</a>
       <a href="#automations">Автоматизации</a>
       <a href="#settings">Настройки</a>
+      <button id="admin" class="btn">🔒 Войти</button>
     </nav>
+    <div id="nav-shade"></div>
   </header>
 
   <main>
