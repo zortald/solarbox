@@ -202,7 +202,7 @@
       const el = document.querySelector(`#fc-charts [data-k="${d}/${m}"]`);
       try {
         const s = await api(`/api/series?device=${d}&metric=${m}&from=${from}&to=${to}`);
-        Plot(el.querySelector('canvas'), { series: [{ ts: s.ts, v: s.v, color }], unit });
+        Plot(el.querySelector('canvas'), { series: [{ ts: s.ts, v: s.v, color }], unit, from, to });
         el.querySelector('[data-cur]').textContent = s.v.length ? num(s.v[s.v.length - 1], unit === '%' ? 0 : 0) + ' ' + unit : '';
       } catch (e) { el.querySelector('[data-cur]').textContent = 'ошибка'; }
     }

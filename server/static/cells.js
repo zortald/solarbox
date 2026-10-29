@@ -72,7 +72,7 @@
         return { ts: d.ts, v: d.v, color: COLORS[i], label: 'Ячейка ' + (i + 1) };
       } catch (e) { return { ts: [], v: [] }; }
     }));
-    Plot($('#cells-chart'), { series, unit: 'В' });
+    Plot($('#cells-chart'), { series, unit: 'В', from, to });
     $('#cells-legend').innerHTML = COLORS.map((c, i) => `<span><i style="background:${c}"></i>${i + 1}</span>`).join('');
   }
 

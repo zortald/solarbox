@@ -1,5 +1,7 @@
 // Minimal dependency-free time-series line chart on a <canvas>.
-// Plot(canvas, { series: [{ts:[], v:[], color, label}], unit }) — one shared
+// Plot(canvas, { series: [{ts:[], v:[], color, label}], unit, from, to }) — the
+// x-axis spans [from, to] (the selected period) when given, so a short history
+// sits where it belongs instead of being stretched across the chart. One shared
 // y-scale across the given series (so pass same-unit series only). Hi-DPI aware,
 // with a hover crosshair + tooltip.
 
@@ -55,7 +57,7 @@
     const colLine = css.getPropertyValue("--line").trim() || "#2a3542";
     const colMuted = css.getPropertyValue("--muted").trim() || "#8b98a8";
 
-    if (!series.length) {
+    if (!series.length && !(opts.from && opts.to)) {
       ctx.fillStyle = colMuted;
       ctx.font = "12px sans-serif";
       ctx.textAlign = "center";
@@ -72,6 +74,8 @@
         if (s.v[i] > vMax) vMax = s.v[i];
       }
     }
+    if (opts.from && opts.to) { tMin = opts.from; tMax = opts.to; }
+    if (!series.length) { vMin = 0; vMax = 1; }
     if (tMin === tMax) tMax = tMin + 1;
     if (vMin === vMax) { vMin -= 1; vMax += 1; }
     const vPad = (vMax - vMin) * 0.08;
@@ -123,6 +127,11 @@
       ctx.stroke();
     }
 
+    if (!series.length) {
+      ctx.fillStyle = colMuted; ctx.font = "12px sans-serif"; ctx.textAlign = "center"; ctx.textBaseline = "middle";
+      ctx.fillText("нет данных за период", PAD.l + plotW / 2, PAD.t + plotH / 2);
+    }
+
     // hover
     canvas.onmousemove = (e) => {
       const rect = canvas.getBoundingClientRect();
@@ -136,7 +145,7 @@
       // cheap redraw: re-run Plot would reset handlers; instead overlay only.
       // Clear the hover layer by repainting base once, then crosshair.
       render();
-      if (mx == null || mx < PAD.l || mx > cssW - PAD.r) return;
+      if (mx == null || mx < PAD.l || mx > cssW - PAD.r || !series.length) return;
       const t = tMin + ((mx - PAD.l) / plotW) * (tMax - tMin);
       ctx.strokeStyle = colMuted;
       ctx.lineWidth = 1;

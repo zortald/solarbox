@@ -68,7 +68,7 @@
       const [dev, m] = k.split('/'), mt = meta(m), el = host.querySelector(`[data-k="${CSS.escape(k)}"]`);
       try {
         const d = await api(`/api/series?device=${dev}&metric=${m}&from=${from}&to=${to}`);
-        Plot(el.querySelector('canvas'), { series: [{ ts: d.ts, v: d.v, color: mt.color }], unit: mt.unit });
+        Plot(el.querySelector('canvas'), { series: [{ ts: d.ts, v: d.v, color: mt.color }], unit: mt.unit, from, to });
         if (d.v.length) el.querySelector('[data-cur]').textContent = SB.num(d.v[d.v.length - 1]) + ' ' + mt.unit;
       } catch (e) { el.querySelector('[data-cur]').textContent = 'ошибка'; }
     }
