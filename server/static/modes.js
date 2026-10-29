@@ -24,7 +24,7 @@
     el.innerHTML = `<div class="ph"><h2>Режим работы</h2><a class="small" href="#inverter">Все настройки инвертора →</a></div>
       <div class="mnow ${m[1]}">${S.ok ? esc(m[0]) : 'нет связи с платой инвертора'}</div>
       <div class="mrow"><span>Приоритет выхода</span><div class="seg">${OUT.map(([k, t]) => `<button class="btn adm${S.out === k ? ' on' : ''}" data-out="${k}">${t}</button>`).join('')}</div></div>
-      <div class="mrow"><span>Приоритет заряда</span><div class="seg">${CHG.map(([k, t]) => `<button class="btn adm${S.chg === k ? ' on' : ''}" data-chg="${k}">${t}</button>`).join('')}</div></div>`;
+      <div class="mrow"><span>Приоритет заряда</span><div class="seg two">${CHG.map(([k, t]) => `<button class="btn adm${S.chg === k ? ' on' : ''}" data-chg="${k}">${t}</button>`).join('')}</div></div>`;
     el.querySelectorAll('[data-out]').forEach((b) => (b.onclick = () => change(`Приоритет выхода: «${b.textContent}»`, () => act('inverter', 'switch/' + P + b.dataset.out, 'turn_on'), S.out === b.dataset.out)));
     el.querySelectorAll('[data-chg]').forEach((b) => (b.onclick = () => change(`Приоритет заряда: «${b.textContent}»`, () => act('inverter', 'text/' + P + 'command', 'set', 'PCP0' + b.dataset.chg), S.chg === b.dataset.chg)));
   }
