@@ -60,29 +60,29 @@
     SETTINGS.forEach((d) => {
       const inp = document.querySelector(`[data-in="${d.id}"]`);
       inp.oninput = () => (inp.dataset.touched = 1);
-      document.querySelector(`[data-ap="${d.id}"]`).onclick = () => {
+      document.querySelector(`[data-ap="${d.id}"]`).onclick = async () => {
         if (!requireAdmin()) return;
         const v = inp.value, label = d.opts ? inp.selectedOptions[0].text : v + ' ' + d.unit;
-        if (v === '' || !confirm(`${d.l}: установить «${label}»?`)) return;
+        if (v === '' || !(await SB.ask(`${d.l}: установить «${label}»?`))) return;
         apply(d.cmd(v), () => same(d.cur(QP()), v));
       };
     });
-    document.querySelectorAll('[data-fl]').forEach((b) => (b.onclick = () => {
+    document.querySelectorAll('[data-fl]').forEach((b) => (b.onclick = async () => {
       if (!requireAdmin()) return;
       const f = b.dataset.fl, on = QF()[f];
-      if (!confirm(`${FLAGSET[f]}: ${on ? 'выключить' : 'включить'}?`)) return;
+      if (!(await SB.ask(`${FLAGSET[f]}: ${on ? 'выключить' : 'включить'}?`))) return;
       apply([(on ? 'PD' : 'PE') + f], () => QF()[f] === !on);
     }));
     document.querySelectorAll('[data-tg]').forEach((b) => (b.onclick = async () => {
       if (!requireAdmin()) return;
       const on = S.pv_power_balance === true;
-      if (!confirm(`Баланс мощности PV: ${on ? 'выключить' : 'включить'}?`)) return;
+      if (!(await SB.ask(`Баланс мощности PV: ${on ? 'выключить' : 'включить'}?`))) return;
       try { await act('inverter', 'switch/' + P + 'pv_power_balance', on ? 'turn_off' : 'turn_on'); toast('Отправлено'); setTimeout(read, 3000); }
       catch (e) { toast('Не получилось: ' + e.message, true); }
     }));
     document.querySelectorAll('[data-pr]').forEach((b) => (b.onclick = async () => {
       if (!requireAdmin() || S[b.dataset.pr] === true) return;
-      if (!confirm(`Переключить приоритет выхода на «${b.textContent}»? Это меняет режим реального инвертора.`)) return;
+      if (!(await SB.ask(`Переключить приоритет выхода на «${b.textContent}»? Это меняет режим реального инвертора.`))) return;
       try { await act('inverter', 'switch/' + P + b.dataset.pr, 'turn_on'); toast('Отправлено, жду подтверждения от инвертора'); setTimeout(read, 4000); }
       catch (e) { toast('Не получилось: ' + e.message, true); }
     }));

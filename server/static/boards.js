@@ -55,7 +55,7 @@
   async function restart(name) {
     if (!requireAdmin()) return;
     const ui = BOARDS[name];
-    if (!confirm(`Перезагрузить плату «${ui.title}»? Данные с неё пропадут примерно на полминуты.`)) return;
+    if (!(await SB.ask(`Перезагрузить плату «${ui.title}»? Данные с неё пропадут примерно на полминуты.`))) return;
     try { await act(name, ui.restart, 'press'); toast('Плата перезагружается'); }
     catch (e) { toast('Не получилось: ' + e.message, true); }
   }
@@ -66,7 +66,7 @@
     const f = el.querySelector('[data-file]').files[0];
     if (!f) return toast('Выбери файл прошивки', true);
     const ui = BOARDS[name];
-    if (!confirm(`Прошить «${ui.title}» файлом ${f.name} (${Math.round(f.size / 1024)} КБ)?\n\nЕсли файл от другой платы, она может не загрузиться — проверь имя.`)) return;
+    if (!(await SB.ask(`Прошить «${ui.title}» файлом ${f.name} (${Math.round(f.size / 1024)} КБ)?\n\nЕсли файл от другой платы, она может не загрузиться — проверь имя.`))) return;
     const msg = el.querySelector('[data-otamsg]');
     flashing = true;
     el.querySelectorAll('button').forEach((b) => (b.disabled = true));

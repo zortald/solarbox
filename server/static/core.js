@@ -53,6 +53,32 @@ const SB = (() => {
   const entity = (board, path) => api(`/api/board/${board}/entity?path=${encodeURIComponent(path)}`);
   const act = (board, path, action, value) => api(`/api/board/${board}/action`, { json: { path, action, value } });
 
+  // ---- dialogs (own modals instead of the browser's confirm/prompt) ----
+  // Red confirm button for anything that touches real hardware or deletes something.
+  const DANGER = /реальн|Прошить|Перезагруз|Удалить|Выполнить|Отключить|Убрать|установить|включить|выключить/i;
+  function modal({ text, ok = 'OK', danger, input }) {
+    return new Promise((res) => {
+      const w = document.createElement('div');
+      w.className = 'modal-wrap';
+      w.innerHTML = `<div class="modal" role="dialog"><div class="mtext"></div>` +
+        (input ? '<input class="minput" type="password" autocomplete="current-password">' : '') +
+        `<div class="mbtns"><button class="btn mcancel">Отмена</button><button class="btn mok ${danger ? 'danger' : 'on'}">${ok}</button></div></div>`;
+      w.querySelector('.mtext').textContent = text;
+      document.body.appendChild(w);
+      const inp = w.querySelector('.minput');
+      const done = (v) => { document.removeEventListener('keydown', key); w.remove(); res(v); };
+      const no = () => done(input ? null : false), yes = () => done(input ? inp.value : true);
+      const key = (e) => { if (e.key === 'Escape') no(); else if (e.key === 'Enter') yes(); };
+      document.addEventListener('keydown', key);
+      w.querySelector('.mcancel').onclick = no;
+      w.querySelector('.mok').onclick = yes;
+      w.onclick = (e) => { if (e.target === w) no(); };
+      setTimeout(() => (inp || w.querySelector('.mok')).focus(), 30);
+    });
+  }
+  const ask = (text, o = {}) => modal({ text, ok: o.ok || 'OK', danger: o.danger ?? DANGER.test(text) });
+  const askText = (text, o = {}) => modal({ text, ok: o.ok || 'Войти', input: true });
+
   // ---- toast ----
   function toast(t, bad) {
     const m = $('#toast'); m.textContent = t; m.className = bad ? 'show bad' : 'show';
@@ -69,11 +95,11 @@ const SB = (() => {
   }
   async function login() {
     if (isAdmin) {
-      if (confirm('Выйти из режима управления?')) { localStorage.removeItem('sbAdmin'); isAdmin = false; renderAdmin(); }
+      if (await ask('Выйти из режима управления?', { ok: 'Выйти' })) { localStorage.removeItem('sbAdmin'); isAdmin = false; renderAdmin(); }
       return;
     }
     if (!controlEnabled) return toast('Управление выключено на сервере (не задан SOLARBOX_ADMIN_PASSWORD)', true);
-    const pw = prompt('Пароль управления:');
+    const pw = await askText('Пароль управления');
     if (!pw) return;
     localStorage.setItem('sbAdmin', pw);
     try { await api('/api/admin/check', { method: 'POST' }); isAdmin = true; toast('Режим управления включён'); }
@@ -170,6 +196,6 @@ const SB = (() => {
     setInterval(renderStatus, 5000);   // keeps "молчит N с" ages moving
   }
 
-  return { $, esc, BOARDS, L, T, v, fresh, age, ago, dur, num, api, entity, act, toast, requireAdmin, page, start,
+  return { $, esc, BOARDS, L, T, v, fresh, age, ago, dur, num, api, entity, act, toast, requireAdmin, page, start, ask, askText,
     get isAdmin() { return isAdmin; }, get cfg() { return cfg; } };
 })();

@@ -31,7 +31,7 @@
 
   async function change(what, send, already) {
     if (already || busy || !requireAdmin()) return;
-    if (!confirm(`${what}? Это меняет режим реального инвертора.`)) return;
+    if (!(await SB.ask(`${what}? Это меняет режим реального инвертора.`))) return;
     busy = true;
     try { await send(); toast('Отправлено, жду подтверждения от инвертора'); for (const d of [2500, 4000, 6000]) { await new Promise((r) => setTimeout(r, d)); await read(); } }
     catch (e) { toast('Не получилось: ' + e.message, true); }

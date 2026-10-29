@@ -47,7 +47,7 @@
       f.files.map((x) => `<div class="frow"><code>${esc(x.name)}</code><span class="${x.override ? 'ok' : 'muted'}">${x.override ? 'изменён' : 'встроенный'}</span>` +
         (x.override ? `<button class="btn adm" data-reset="${esc(x.name)}">Вернуть</button>` : '<span></span>') + '</div>').join('');
     document.querySelectorAll('[data-reset]').forEach((b) => (b.onclick = async () => {
-      if (!requireAdmin() || !confirm(`Вернуть встроенную версию ${b.dataset.reset}?`)) return;
+      if (!requireAdmin() || !(await SB.ask(`Вернуть встроенную версию ${b.dataset.reset}?`))) return;
       try { await api('/api/files/' + encodeURIComponent(b.dataset.reset), { method: 'DELETE' }); toast('Возвращено — обнови страницу'); ui(); }
       catch (e) { toast('Не получилось: ' + e.message, true); }
     }));
@@ -71,7 +71,7 @@
     };
     $('#tg-test').onclick = async () => { try { await api('/api/telegram/test', { method: 'POST' }); toast('Отправлено — проверь Telegram'); } catch (e) { toast(e.message, true); } };
     if ($('#tg-off')) $('#tg-off').onclick = async () => {
-      if (!confirm('Отключить Telegram и забыть токен?')) return;
+      if (!(await SB.ask('Отключить Telegram и забыть токен?'))) return;
       try { await api('/api/telegram', { method: 'PUT', json: { disable: true } }); toast('Отключено'); tg(); } catch (e) { toast(e.message, true); }
     };
   }

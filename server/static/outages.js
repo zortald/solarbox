@@ -35,7 +35,7 @@
           : '<p class="muted small">Отключений не было.</p>'}
         <p class="muted small">Отключение — сеть ниже ${out.thresholds.low} В дольше ${out.thresholds.hold_s} с; закончилось — выше ${out.thresholds.high} В. Считается на сервере по каждому пакету от инвертора, даже когда дашборд закрыт. ✕ (после входа) убирает запись из учёта — например, тестовое отключение.</p></div>`;
     el.querySelectorAll('[data-odel]').forEach((b) => (b.onclick = async () => {
-      if (!SB.requireAdmin() || !confirm(`Убрать отключение ${when(+b.dataset.odel)} из учёта?`)) return;
+      if (!SB.requireAdmin() || !(await SB.ask(`Убрать отключение ${when(+b.dataset.odel)} из учёта?`))) return;
       try { await api('/api/outages/' + b.dataset.odel, { method: 'DELETE' }); SB.toast('Убрано'); refresh(true); }
       catch (e) { SB.toast(e.message, true); }
     }));

@@ -80,10 +80,10 @@
     $('#a-tpl').onchange = (e) => { const t = TEMPLATES[+e.target.value]; if (t) edit(JSON.parse(JSON.stringify({ id: newId(), enabled: true, and: [], on_clear: [], for_s: 0, ...t }))); };
     document.querySelectorAll('[data-ed]').forEach((b) => (b.onclick = () => edit(JSON.parse(JSON.stringify(rules.find((r) => r.id === b.dataset.ed))))));
     document.querySelectorAll('[data-tg]').forEach((b) => (b.onclick = () => { if (!requireAdmin()) return; save(rules.map((r) => r.id === b.dataset.tg ? { ...r, enabled: !r.enabled } : r)).then(load); }));
-    document.querySelectorAll('[data-del]').forEach((b) => (b.onclick = () => { const r = rules.find((x) => x.id === b.dataset.del); if (!requireAdmin() || !confirm(`Удалить правило «${r.name}»?`)) return; save(rules.filter((x) => x.id !== r.id)).then(load); }));
+    document.querySelectorAll('[data-del]').forEach((b) => (b.onclick = async () => { const r = rules.find((x) => x.id === b.dataset.del); if (!requireAdmin() || !(await SB.ask(`Удалить правило «${r.name}»?`))) return; save(rules.filter((x) => x.id !== r.id)).then(load); }));
     document.querySelectorAll('[data-run]').forEach((b) => (b.onclick = async () => {
       const r = rules.find((x) => x.id === b.dataset.run);
-      if (!requireAdmin() || !confirm(`Выполнить действия правила «${r.name}» прямо сейчас (без проверки условия)?`)) return;
+      if (!requireAdmin() || !(await SB.ask(`Выполнить действия правила «${r.name}» прямо сейчас (без проверки условия)?`))) return;
       try { await api(`/api/automations/${r.id}/run`, { method: 'POST' }); toast('Запущено — смотри журнал'); setTimeout(load, 2500); } catch (e) { toast(e.message, true); }
     }));
   }
