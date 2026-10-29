@@ -10,7 +10,7 @@
   const C = { pv: '#f5b041', load: '#ff9eb5', batt: '#ff9eb5', grid: '#4ea3ff' };
   // Lines run source → inverter (pv, grid, batt) or inverter → load.
   const LINKS = [
-    ['pv', 'M250 96 V150'],
+    ['pv', 'M250 102 V150'],
     ['grid', 'M84 205 H215'],
     ['load', 'M285 205 H418'],
     ['batt', 'M250 336 V245'],
@@ -34,9 +34,9 @@
     $('#flow-svg').innerHTML =
       LINKS.map(([id, d]) => `<path d="${d}" class="fline" style="stroke:${C[id]}"/><path d="${d}" class="fdash" id="fd-${id}" style="stroke:${C[id]}"/>`).join('') +
       // PV header + box
-      // PV row: icon + "today" label to the left of the box, voltage to the right
-      ICON.pv(56, 66) + T('ft-pv', 198, 74, 'flab', 'end', 'СОЛНЦЕ СЕГОДНЯ') + T('fe-pv', 198, 95, 'fe', 'end') +
-      box('pv', 208, 64, C.pv) + T('fs-pv', 300, 84, 'fs', 'start') +
+      // PV: two-line box — watts now, today's kWh under it; voltage to the right
+      `<rect id="fb-pv" x="208" y="58" width="84" height="44" rx="8" class="fbox" style="stroke:${C.pv}"/>` +
+      T('fv-pv', 250, 77, 'fv') + T('fe-pv', 250, 94, 'fs') + T('fs-pv', 300, 84, 'fs', 'start') +
       // grid
       ICON.grid(32, 178) + `<line id="grid-x" x1="26" y1="176" x2="76" y2="234" class="fcross"/>` +
       box('grid', 108, 189, C.grid) + T('fl-grid', 150, 242, 'flab', 'middle', 'Из сети сегодня') + T('fe-grid', 150, 264, 'fe') +
@@ -104,7 +104,7 @@
     // PV
     set('fv-pv', W(p.pv));
     set('fs-pv', v('inverter', 'pv_v') !== undefined ? num(v('inverter', 'pv_v'), 0) + ' V' : '');
-    set('fe-pv', kwh(E.pv));
+    set('fe-pv', E.pv === undefined ? '' : 'сегодня ' + kwh(E.pv));
     // grid
     set('fv-grid', p.gridUp ? '≈ ' + W(p.grid) : 'нет');
     set('fe-grid', kwh(E.grid));
