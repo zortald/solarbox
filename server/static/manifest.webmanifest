@@ -1,6 +1,6 @@
 {
-  "name": "solarbox",
-  "short_name": "solarbox",
+  "name": "Solarbox",
+  "short_name": "Solarbox",
   "description": "Солнце, АКБ и инвертор — дашборд площадки",
   "start_url": "/",
   "scope": "/",

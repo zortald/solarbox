@@ -1,6 +1,6 @@
 // Minimal service worker: makes the dashboard installable and lets the shell
 // open offline. API calls always go to the network (live data only).
-const CACHE = 'solarbox-shell-v1';
+const CACHE = 'solarbox-shell-v2';
 self.addEventListener('install', (e) => self.skipWaiting());
 self.addEventListener('activate', (e) => e.waitUntil(self.clients.claim()));
 self.addEventListener('fetch', (e) => {
