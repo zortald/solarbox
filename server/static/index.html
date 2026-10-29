@@ -20,24 +20,31 @@
       <a href="#inverter">Инвертор</a>
       <a href="#boards">Платы</a>
       <a href="#history">История</a>
+      <a href="#settings">Настройки</a>
     </nav>
   </header>
 
   <main>
     <section data-page="flow" id="page-flow">
-      <div class="panel flow"><svg id="flow-svg" viewBox="0 0 360 290"></svg></div>
-      <div class="panel facts" id="flow-facts"></div>
+      <div class="flowtop">
+        <div class="panel flow"><svg id="flow-svg" viewBox="0 0 500 430"></svg></div>
+        <div class="flowside">
+          <div class="panel" id="flow-cells"></div>
+          <div class="panel facts" id="flow-facts"></div>
+        </div>
+      </div>
       <div class="panel">
         <div class="ph"><h2>Мощность</h2><div class="row" id="fc-ranges"></div></div>
         <div class="legend" id="fc-legend"></div>
         <canvas id="fc-power" class="tall"></canvas>
       </div>
       <div class="panel"><h2>Заряд АКБ</h2><canvas id="fc-soc"></canvas></div>
-      <p class="muted small">Мощность сети инвертор не сообщает — на схеме она оценена по балансу (≈), в графиках её нет.</p>
+      <p class="muted small">Мощность сети инвертор не сообщает — она оценена по балансу (≈); в графиках её нет.</p>
     </section>
 
     <section data-page="cells" id="page-cells" hidden>
-      <div class="panel"><h2>Ячейки</h2><div id="cells"></div></div>
+      <div class="panel" id="cells-tiles"></div>
+      <div class="panel"><h2>Ячейки подробно</h2><div id="cells"></div></div>
       <div class="panel facts" id="cell-facts"></div>
       <div class="panel"><h2>Состояние BMS</h2>
         <div class="facts"><div><span>Ошибки</span><b id="bms-errors">—</b></div><div><span>Наработка</span><b id="bms-runtime">—</b></div></div>
@@ -67,6 +74,13 @@
       <div class="panel"><div class="row" id="h-ranges"></div><div id="h-metrics"></div></div>
       <div id="h-charts"></div>
     </section>
+    <section data-page="settings" id="page-settings" hidden>
+      <div class="panel"><h2>Ресурсы</h2><div class="facts wide" id="set-res"></div></div>
+      <div class="panel"><h2>База данных</h2><div class="facts" id="set-db"></div>
+        <h3>Прореживание истории</h3><div class="row" id="set-tiers"></div></div>
+      <div class="panel"><h2>Интерфейс</h2><div id="set-files"></div></div>
+      <div class="panel"><h2>Конфигурация</h2><div id="set-config"></div></div>
+    </section>
   </main>
 
   <div id="toast"></div>
@@ -78,6 +92,7 @@
   <script src="/inverter.js"></script>
   <script src="/boards.js"></script>
   <script src="/history.js"></script>
+  <script src="/settings.js"></script>
   <script>SB.start();</script>
 </body>
 </html>

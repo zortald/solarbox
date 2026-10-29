@@ -194,3 +194,12 @@ pub fn last_push(conn: &Connection) -> rusqlite::Result<Vec<(String, i64)>> {
     let rows = st.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?;
     rows.collect()
 }
+
+/// (rows, devices, oldest ts, newest ts) of the samples table.
+pub fn stats(conn: &Connection) -> rusqlite::Result<(i64, i64, Option<i64>, Option<i64>)> {
+    conn.query_row(
+        "SELECT COUNT(*), COUNT(DISTINCT device), MIN(ts), MAX(ts) FROM samples",
+        [],
+        |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
+    )
+}

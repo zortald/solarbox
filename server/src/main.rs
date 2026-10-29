@@ -10,6 +10,7 @@ mod config;
 mod db;
 mod files;
 mod ota;
+mod sysinfo;
 
 use axum::{
     extract::{DefaultBodyLimit, Json, Path, Query, State},
@@ -44,6 +45,10 @@ struct AppState {
     /// Password for anything that changes state (None = control disabled).
     admin: Option<String>,
     ota_busy: Arc<AtomicBool>,
+    /// CPU sampler + process start time for /api/system.
+    sys: Arc<sysinfo::Sampler>,
+    db_path: String,
+    retention_days: i64,
 }
 
 #[derive(RustEmbed)]
@@ -86,7 +91,19 @@ async fn main() {
         static_dir: PathBuf::from(env("SOLARBOX_STATIC_DIR", "/data/static")),
         admin: std::env::var("SOLARBOX_ADMIN_PASSWORD").ok().filter(|s| !s.is_empty()),
         ota_busy: Arc::new(AtomicBool::new(false)),
+        sys: Arc::new(sysinfo::Sampler::new()),
+        db_path: db_path.clone(),
+        retention_days,
     };
+    {
+        let sys = state.sys.clone();
+        tokio::spawn(async move {
+            loop {
+                sys.sample();
+                tokio::time::sleep(Duration::from_secs(5)).await;
+            }
+        });
+    }
     let control = format!("{} board(s), ui overrides in {}, control {}", state.config.get().boards.len(),
         state.static_dir.display(),
         if state.admin.is_some() { "enabled" } else { "disabled" });
@@ -136,6 +153,7 @@ async fn main() {
         .route("/api/admin/check", post(boards::admin_check))
         .route("/api/config", get(files::get_config).put(files::put_config))
         .route("/api/files", get(files::list))
+        .route("/api/system", get(sysinfo::system))
         .route("/api/files/:name", axum::routing::put(files::put).delete(files::delete))
         .route("/healthz", get(|| async { "ok" }))
         .route("/", get(|State(st): State<AppState>| async move { files::serve(&st, "index.html") }))

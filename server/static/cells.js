@@ -76,8 +76,26 @@
     $('#cells-legend').innerHTML = COLORS.map((c, i) => `<span><i style="background:${c}"></i>${i + 1}</span>`).join('');
   }
 
+  // Compact tile grid (min blue, max red), used on this page and on «Потоки».
+  function tiles(el) {
+    if (!el) return;
+    const cells = [...Array(N)].map((_, i) => v('bms', 'c' + (i + 1)));
+    const have = cells.filter((x) => x !== undefined);
+    const mx = Math.max(...have), mn = Math.min(...have);
+    const d = v('bms', 'cell_delta'), t = v('bms', 't1'), bal = v('bms', 'bal') >= 0.5;
+    const head = `<div class="chead"><b>▯ Ячейки батареи</b><div>` +
+      `<span title="разброс">↕ ${d !== undefined ? num(d * 1000, 0) + ' mV' : '—'}</span>` +
+      `<span title="температура">🌡 ${t !== undefined ? num(t, 1) + ' °C' : '—'}</span>` +
+      `<span title="балансировка">${bal ? '⚖ баланс' : '⚖ —'}</span></div></div>`;
+    el.innerHTML = head + (have.length ? `<div class="ctiles">` + cells.map((c, i) => {
+      const cls = have.length > 1 && mx !== mn ? (c === mx ? ' max' : c === mn ? ' min' : '') : '';
+      return `<div class="ctile${cls}"><small>${i + 1}</small><b>${c === undefined ? '—' : c.toFixed(3)}</b></div>`;
+    }).join('') + '</div>' : '<div class="empty">Нет данных по ячейкам.</div>');
+  }
+  SB.cellTiles = tiles;
+
   page('cells', {
     show() { extrasAt = 0; chartAt = 0; },
-    tick() { bars(); facts(); extras(); chart(); },
+    tick() { tiles($('#cells-tiles')); bars(); facts(); extras(); chart(); },
   });
 })();

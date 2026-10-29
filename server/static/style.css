@@ -43,22 +43,44 @@ body.admin .adm-hint { display: none; }
 .facts span { font-size: 11px; color: var(--muted); }
 .facts b { font-size: 16px; font-weight: 600; }
 
-/* flow */
+/* flow (Sunsynk-style) */
+.flowtop { display: grid; gap: 12px; grid-template-columns: minmax(0, 560px) minmax(0, 1fr); align-items: start; }
+.flowside { display: grid; gap: 12px; }
+@media (max-width: 900px) { .flowtop { grid-template-columns: 1fr; } }
 .flow { padding: 6px; }
-#flow-svg { width: 100%; max-height: 62vh; display: block; }
+#flow-svg { width: 100%; display: block; }
 #flow-svg.stale { opacity: .5; }
-.fline { fill: none; stroke-width: 3; opacity: .25; }
-.fdash { fill: none; stroke-width: 3; stroke-dasharray: 4 10; stroke-linecap: round; animation: flow 1.4s linear infinite; }
+.fline { fill: none; stroke-width: 2; opacity: .35; }
+.fdash { fill: none; stroke-width: 2.5; stroke-dasharray: 4 10; stroke-linecap: round; animation: flow 1.4s linear infinite; }
 .fdash.f2 { animation-duration: .9s; } .fdash.f3 { animation-duration: .5s; }
 .fdash.rev { animation-direction: reverse; }
 @keyframes flow { to { stroke-dashoffset: -14; } }
-.fnode rect { fill: var(--panel2); stroke-width: 2; }
-.fnode.inv rect { fill: #202a37; stroke: var(--line); }
-.fnode.off { opacity: .55; }
-.ft { fill: var(--muted); font-size: 11px; text-anchor: middle; }
-.fv { fill: var(--fg); font-size: 15px; font-weight: 700; text-anchor: middle; }
-.fs { fill: var(--muted); font-size: 10px; text-anchor: middle; }
+.fbox { fill: var(--panel2); stroke-width: 1.5; }
+.fbox.idle { opacity: .55; }
+.ficon { fill: none; stroke-width: 2.2; stroke-linecap: round; stroke-linejoin: round; }
+.ficon.off { opacity: .35; }
+.finv { fill: #c9d1d9; } .fscr { fill: #57606a; }
+.fdot { fill: var(--ok); } .fdot.bad { fill: var(--bad); }
+.fbat { fill: none; stroke-width: 2.5; } .blev { fill: #2a3542; }
+.fv { fill: var(--fg); font-size: 14px; font-weight: 700; }
+.fs { fill: var(--muted); font-size: 11.5px; }
+.fsm { fill: #24292f; font-size: 11px; font-weight: 600; }
+.flab { fill: var(--muted); font-size: 11px; }
+.fe { fill: var(--fg); font-size: 18px; }
+.fsoc { fill: var(--fg); font-size: 26px; font-weight: 700; }
 .fcross { stroke: var(--bad); stroke-width: 3; stroke-linecap: round; }
+
+/* cell tiles */
+.chead { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 10px; flex-wrap: wrap; }
+.chead b { font-size: 15px; font-weight: 600; }
+.chead span { font-size: 12px; color: var(--muted); margin-left: 12px; }
+.ctiles { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
+.ctile { background: var(--panel2); border: 1px solid var(--line); border-radius: 10px; text-align: center; padding: 6px 4px 7px; }
+.ctile small { display: block; font-size: 11px; color: var(--muted); }
+.ctile b { font-size: 17px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.ctile i { display: block; font-style: normal; font-size: 10px; color: var(--muted); }
+.ctile.min { background: #10314f; border-color: #1f5a8a; }
+.ctile.max { background: #4a1d1d; border-color: #8a2f2f; }
 
 /* cells */
 .cell { display: grid; grid-template-columns: 22px 1fr 76px 64px 64px; align-items: center; gap: 8px; padding: 4px 0; font-variant-numeric: tabular-nums; }
@@ -105,3 +127,13 @@ canvas.tall { height: 220px; }
 
 #toast { position: fixed; left: 50%; bottom: 18px; transform: translateX(-50%); background: #23303f; border: 1px solid var(--line); padding: 10px 16px; border-radius: 10px; opacity: 0; pointer-events: none; transition: opacity .2s; max-width: 90vw; z-index: 20; }
 #toast.show { opacity: 1; } #toast.bad { border-color: var(--bad); }
+
+/* settings */
+.facts.wide { grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: 12px 18px; }
+.facts small { font-size: 11px; color: var(--muted); }
+.sbar { display: block; height: 6px; background: var(--panel2); border-radius: 3px; overflow: hidden; margin: 4px 0 2px; }
+.sbar i { display: block; height: 100%; background: var(--accent); }
+.tier { background: var(--panel2); border: 1px solid var(--line); border-radius: 8px; padding: 4px 8px; font-size: 12px; }
+.frow { display: grid; grid-template-columns: 1fr auto auto; gap: 10px; align-items: center; padding: 5px 0; border-top: 1px solid var(--line); font-size: 13px; }
+pre { background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 10px; overflow: auto; font-size: 12px; max-height: 50vh; }
+details summary { cursor: pointer; color: var(--muted); }

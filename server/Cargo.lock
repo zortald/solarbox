@@ -674,6 +674,7 @@ name = "solarbox"
 version = "0.1.0"
 dependencies = [
  "axum",
+ "libc",
  "md-5",
  "mime_guess",
  "rusqlite",
