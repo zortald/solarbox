@@ -120,7 +120,7 @@ input[type=number] { width: 84px; }
 #h-metrics details { margin: 4px 0; }
 #h-metrics summary { cursor: pointer; color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: .5px; }
 #h-metrics label { display: inline-flex; gap: 5px; align-items: center; margin: 4px 12px 0 0; font-size: 13px; }
-#h-charts { display: grid; grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); gap: 12px; }
+#h-charts, .fcgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); gap: 12px; }
 .chart { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 10px 10px 4px; }
 .ch { display: flex; justify-content: space-between; font-size: 13px; margin-bottom: 4px; }
 canvas { width: 100%; height: 170px; display: block; }
@@ -155,3 +155,5 @@ details summary { cursor: pointer; color: var(--muted); }
 .lrow { display: grid; grid-template-columns: 150px 180px 1fr; gap: 10px; font-size: 12px; padding: 4px 0; border-top: 1px solid var(--line); }
 @media (max-width: 600px) { .lrow { grid-template-columns: 1fr; gap: 0; } }
 #set-tg .row { margin-top: 6px; } #set-tg input { min-width: 220px; }
+
+.fcgrid .chart { background: var(--panel2); }

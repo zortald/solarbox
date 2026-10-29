@@ -18,3 +18,5 @@ sleep 6
 echo ">> start"; curl -sS -m10 -u "$C" -X POST $B/container/start -H "$H" -d '{".id":"solarbox"}' -o /dev/null
 i=0; until curl -sf -m3 http://127.0.0.1:48080/healthz >/dev/null || [ $i -ge 20 ]; do sleep 2; i=$((i+1)); done
 curl -sf -m3 http://127.0.0.1:48080/healthz >/dev/null && echo ">> up" || { echo ">> NOT answering — check /log on the router"; exit 1; }
+# The image is extracted into the container's root-dir; the tar only wastes flash now.
+curl -sS -m10 -u "$C" -X POST $B/file/remove -H "$H" -d '{"numbers":"solarbox-armv5.tar"}' -o /dev/null && echo ">> removed uploaded tar from router flash"

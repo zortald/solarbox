@@ -180,22 +180,32 @@
     };
   }
 
-  // ---- charts ----
-  const SERIES = [['inverter', 'pv_w', 'Солнце', '#f5b041'], ['inverter', 'ac_out_w', 'Дом', '#ff9eb5'], ['bms', 'bms_w', 'АКБ (+ заряд / − разряд)', '#3fb950']];
+  // ---- charts: one per metric, each on its own scale (like «История») ----
+  const CHARTS = [
+    ['inverter', 'pv_w', 'Солнце', 'Вт', '#f5b041'],
+    ['inverter', 'ac_out_w', 'Дом', 'Вт', '#ff9eb5'],
+    ['bms', 'bms_w', 'АКБ (+ заряд / − разряд)', 'Вт', '#3fb950'],
+    ['bms', 'soc', 'Заряд АКБ', '%', '#3fb950'],
+  ];
   const RANGES = [['6ч', 21600], ['24ч', 86400], ['7д', 604800]];
   let range = 86400, chartsAt = 0;
   function rangeButtons() {
     $('#fc-ranges').innerHTML = RANGES.map(([l, s]) => `<button class="btn${s === range ? ' on' : ''}" data-s="${s}">${l}</button>`).join('');
     document.querySelectorAll('#fc-ranges button').forEach((b) => (b.onclick = () => { range = +b.dataset.s; rangeButtons(); chartsAt = 0; charts(); }));
-    $('#fc-legend').innerHTML = SERIES.map(([, , l, c]) => `<span><i style="background:${c}"></i>${l}</span>`).join('');
+    $('#fc-charts').innerHTML = CHARTS.map(([d, m, t]) => `<div class="chart" data-k="${d}/${m}"><div class="ch"><b>${t}</b><span data-cur></span></div><canvas></canvas></div>`).join('');
   }
   async function charts() {
     if (Date.now() - chartsAt < 60000) return;
     chartsAt = Date.now();
     const to = Math.floor(Date.now() / 1000), from = to - range;
-    const get = async (d, m) => { try { return await api(`/api/series?device=${d}&metric=${m}&from=${from}&to=${to}&points=400`); } catch (e) { return { ts: [], v: [] }; } };
-    Plot($('#fc-power'), { series: await Promise.all(SERIES.map(async ([d, m, label, color]) => ({ ...(await get(d, m)), color, label }))), unit: 'Вт' });
-    Plot($('#fc-soc'), { series: [{ ...(await get('bms', 'soc')), color: '#3fb950' }], unit: '%' });
+    for (const [d, m, , unit, color] of CHARTS) {
+      const el = document.querySelector(`#fc-charts [data-k="${d}/${m}"]`);
+      try {
+        const s = await api(`/api/series?device=${d}&metric=${m}&from=${from}&to=${to}`);
+        Plot(el.querySelector('canvas'), { series: [{ ts: s.ts, v: s.v, color }], unit });
+        el.querySelector('[data-cur]').textContent = s.v.length ? num(s.v[s.v.length - 1], unit === '%' ? 0 : 0) + ' ' + unit : '';
+      } catch (e) { el.querySelector('[data-cur]').textContent = 'ошибка'; }
+    }
   }
 
   let resized;

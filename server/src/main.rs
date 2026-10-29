@@ -82,6 +82,8 @@ async fn main() {
         .unwrap_or_else(default_tiers);
     let compact_every = parse_dur(&env("SOLARBOX_COMPACT_EVERY", "1h")).unwrap_or(3_600).max(60);
     let tail = parse_dur(&env("SOLARBOX_COMPACT_TAIL", "2d")).unwrap_or(172_800);
+    // Safety net for the router's flash: oldest history goes first past this.
+    let max_db: i64 = env("SOLARBOX_MAX_DB_MB", "40").parse::<i64>().unwrap_or(40).max(5) * 1_048_576;
 
     let conn = db::open(&db_path).expect("open database");
     let db = Arc::new(Mutex::new(conn));
@@ -144,6 +146,11 @@ async fn main() {
                         Ok(n) if n > 0 => eprintln!("[compact] rewrote {n} rows"),
                         Ok(_) => {}
                         Err(e) => eprintln!("[compact] {e}"),
+                    }
+                    match db::enforce_cap(&c, max_db) {
+                        Ok(n) if n > 0 => eprintln!("[cap] database over limit, dropped {n} oldest points"),
+                        Ok(_) => {}
+                        Err(e) => eprintln!("[cap] {e}"),
                     }
                     if retention_days > 0 {
                         let cutoff = now() - retention_days * 86_400;
