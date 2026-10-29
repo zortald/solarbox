@@ -30,6 +30,16 @@
     return v.toFixed(2);
   }
 
+  // A gap is anything much longer than the series' usual step (and > 5 min).
+  function gapLimit(s) {
+    if (s._gap !== undefined) return s._gap;
+    const d = [];
+    for (let i = 1; i < s.ts.length; i++) d.push(s.ts[i] - s.ts[i - 1]);
+    d.sort((a, b) => a - b);
+    const med = d.length ? d[d.length >> 1] : 60;
+    return (s._gap = Math.max(300, med * 5));
+  }
+
   window.Plot = function (canvas, opts) {
     const series = (opts.series || []).filter((s) => s.ts && s.ts.length);
     const dpr = window.devicePixelRatio || 1;
@@ -106,7 +116,9 @@
       ctx.beginPath();
       for (let i = 0; i < s.ts.length; i++) {
         const px = x(s.ts[i]), py = y(s.v[i]);
-        i ? ctx.lineTo(px, py) : ctx.moveTo(px, py);
+        // Break the line across gaps in the data instead of bridging them.
+        const gap = i && s.ts[i] - s.ts[i - 1] > gapLimit(s);
+        i && !gap ? ctx.lineTo(px, py) : ctx.moveTo(px, py);
       }
       ctx.stroke();
     }
@@ -192,7 +204,9 @@
         ctx.beginPath();
         for (let i = 0; i < s.ts.length; i++) {
           const px = x(s.ts[i]), py = y(s.v[i]);
-          i ? ctx.lineTo(px, py) : ctx.moveTo(px, py);
+          // Break the line across gaps in the data instead of bridging them.
+        const gap = i && s.ts[i] - s.ts[i - 1] > gapLimit(s);
+        i && !gap ? ctx.lineTo(px, py) : ctx.moveTo(px, py);
         }
         ctx.stroke();
       }

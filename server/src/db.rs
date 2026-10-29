@@ -150,6 +150,12 @@ pub fn catalog(conn: &Connection) -> rusqlite::Result<Vec<(String, String, f64, 
 /// window is wide relative to `maxpoints`.
 pub fn series(conn: &Connection, device: &str, metric: &str, from: i64, to: i64, maxpoints: i64) -> rusqlite::Result<(Vec<i64>, Vec<f64>)> {
     let Some(id) = find_mid(conn, device, metric)? else { return Ok((vec![], vec![])) };
+    // Size buckets by where data actually exists in the window, not by the
+    // requested window: 7 h of history in a "7 days" view stays full-resolution.
+    let span: (Option<i64>, Option<i64>) = conn
+        .prepare_cached("SELECT MIN(ts), MAX(ts) FROM points WHERE mid = ?1 AND ts >= ?2 AND ts <= ?3")?
+        .query_row(params![id, from, to], |r| Ok((r.get(0)?, r.get(1)?)))?;
+    let (Some(from), Some(to)) = span else { return Ok((vec![], vec![])) };
     let bucket = ((to - from).max(1) / maxpoints.max(1)).max(1);
     let mut st = if bucket <= 1 {
         conn.prepare_cached("SELECT ts, CAST(v AS REAL) FROM points WHERE mid = ?1 AND ts >= ?2 AND ts <= ?3 AND ?4 > 0 ORDER BY ts")?
@@ -309,6 +315,17 @@ mod tests {
         assert_eq!(ts, vec![100, 105]);
         assert!((v[0] - 27.637).abs() < 1e-9 && (v[1] + 692.289).abs() < 1e-9);
         assert_eq!(series(&c, "bms", "nope", 0, 200, 10).unwrap().0.len(), 0);
+    }
+
+    #[test]
+    fn buckets_follow_available_data() {
+        let mut c = mem();
+        for i in 0..400 {
+            put(&mut c, 1_000_000 + i * 20, "soc", (i % 50) as f64);
+        }
+        // Ask for a week ending at the last point: only ~2 h exist → no coarse bucketing.
+        let (ts, _) = series(&c, "bms", "soc", 1_000_000 + 400 * 20 - 604_800, 1_000_000 + 400 * 20, 600).unwrap();
+        assert_eq!(ts.len(), 400);
     }
 
     #[test]
