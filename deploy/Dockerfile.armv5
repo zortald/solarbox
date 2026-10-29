@@ -1,0 +1,23 @@
+# Static ARMv5TE musl binary for RouterOS containers on EN7562CT boards
+# (hAP ax S, hEX refresh): RouterOS reports "arm" there, but MikroTik only
+# supports arm32v5 images on that CPU. Alpine has no arm/v5, so the final image
+# is just the static binary on scratch. The compile runs on the native build
+# host ($BUILDPLATFORM); only the final image is linux/arm/v5.
+#
+#   docker buildx build --platform linux/arm/v5 --provenance=false --sbom=false \
+#     -f deploy/Dockerfile.armv5 -o type=docker,dest=solarbox-armv5.tar .
+
+FROM --platform=$BUILDPLATFORM messense/rust-musl-cross:armv5te-musleabi AS build
+WORKDIR /src
+COPY server/ ./
+# The image defaults CARGO_BUILD_TARGET to armv5te-unknown-linux-musleabi.
+RUN cargo build --release
+
+FROM scratch
+COPY --from=build /src/target/armv5te-unknown-linux-musleabi/release/solarbox /solarbox
+WORKDIR /data
+ENV SOLARBOX_DB=/data/solarbox.db \
+    SOLARBOX_ADDR=0.0.0.0:8080 \
+    SOLARBOX_RETENTION_DAYS=0
+EXPOSE 8080
+ENTRYPOINT ["/solarbox"]
