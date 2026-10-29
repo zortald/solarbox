@@ -154,8 +154,7 @@
       ['Темп. АКБ / MOS', num(v('bms', 't1'), 1) + ' / ' + num(v('bms', 't_mos'), 1) + ' °C'],
       ['Заряд / разряд (инв.)', num(v('inverter', 'batt_chg_a'), 0) + ' / ' + num(v('inverter', 'batt_dis_a'), 0) + ' А'],
     ];
-    $('#flow-facts').innerHTML = rows.map(([k, x]) => `<div><span>${k}</span><b>${x}</b></div>`).join('');    SB.cellTiles?.($('#flow-cells'));
-  }
+    $('#flow-facts').innerHTML = rows.map(([k, x]) => `<div><span>${k}</span><b>${x}</b></div>`).join('');  }
 
   // Outage data comes from outages.js (shared with the «Отключения» page).
   const out_ = () => SB.outages?.data();
@@ -238,7 +237,7 @@
   window.addEventListener('resize', () => { clearTimeout(resized); resized = setTimeout(() => { if (!$('#page-flow').hidden) { chartsAt = 0; charts(); } }, 200); });
 
   page('flow', {
-    show() { controls(); chartsAt = 0; todayAt = 0; },
-    async tick() { render(); await energy(); await SB.outages.refresh(); render(); charts(); },
+    show() { controls(); chartsAt = 0; todayAt = 0; SB.modes.refresh(true); },
+    async tick() { render(); SB.modes.refresh(); await energy(); await SB.outages.refresh(); render(); charts(); },
   });
 })();

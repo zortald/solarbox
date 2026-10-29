@@ -201,3 +201,11 @@ nav #admin { margin-left: auto; margin-right: 6px; white-space: nowrap; }
   #nav-shade { position: fixed; inset: 0; background: rgba(0,0,0,.45); z-index: 25; }
   nav.open ~ #nav-shade { display: block; }
 }
+
+/* operating mode panel */
+.mnow { font-size: 18px; font-weight: 600; margin: 4px 0 12px; }
+.mnow.grid { color: var(--accent); } .mnow.batt { color: var(--ok); } .mnow.bad { color: var(--bad); }
+.mrow { display: grid; gap: 6px; margin-bottom: 10px; }
+.mrow > span { font-size: 12px; color: var(--muted); }
+.seg { display: flex; flex-wrap: wrap; gap: 6px; }
+.seg .btn { flex: 1 1 auto; text-align: center; }
