@@ -20,10 +20,13 @@ use std::{
 pub struct Cond {
     pub device: String,
     pub metric: String,
-    /// > < >= <= == != | "changed" (momentary) | "stale" (no data for `value` s)
+    /// > < >= <= == != | "between" (value..value2, wraps past midnight for the
+    /// clock) | "changed" (momentary) | "stale" (no data for `value` s)
     pub op: String,
     #[serde(default)]
     pub value: f64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub value2: Option<f64>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -113,7 +116,7 @@ fn now_ts() -> i64 {
 }
 
 pub fn validate(rules: &[Rule]) -> Result<(), String> {
-    let ops = [">", "<", ">=", "<=", "==", "!=", "changed", "stale"];
+    let ops = [">", "<", ">=", "<=", "==", "!=", "between", "changed", "stale"];
     let mut ids = std::collections::HashSet::new();
     for r in rules {
         if r.id.is_empty() || !ids.insert(r.id.clone()) {
@@ -122,6 +125,9 @@ pub fn validate(rules: &[Rule]) -> Result<(), String> {
         for c in std::iter::once(&r.when).chain(r.and.iter()) {
             if !ops.contains(&c.op.as_str()) {
                 return Err(format!("{}: unknown operator «{}»", r.name, c.op));
+            }
+            if c.op == "between" && c.value2.is_none() {
+                return Err(format!("{}: «between» needs value2", r.name));
             }
         }
         for a in r.then.iter().chain(r.on_clear.iter()) {
@@ -272,10 +278,20 @@ impl Engine {
         evaluate(&mut g, Some((device, &changed)))
     }
 
-    /// Periodic evaluation (hold times, staleness).
-    pub fn tick(&self) -> Vec<(Rule, bool)> {
+    /// Set a derived value (clock, today's energy…) usable in conditions.
+    pub fn set_value(&self, device: &str, metric: &str, v: f64, ts: i64) {
+        self.inner.lock().unwrap().values.insert((device.to_string(), metric.to_string()), (v, ts));
+    }
+
+    /// Periodic evaluation (clock, hold times, staleness).
+    pub fn tick(&self, tz: &crate::tz::Tz) -> Vec<(Rule, bool)> {
         self.reload_if_changed();
+        let now = now_ts();
         let mut g = self.inner.lock().unwrap();
+        let minute = tz.minute_of_day(now);
+        for (m, v) in [("minute", minute), ("hour", minute / 60), ("weekday", tz.weekday(now))] {
+            g.values.insert(("clock".to_string(), m.to_string()), (v as f64, now));
+        }
         evaluate(&mut g, None)
     }
 }
@@ -302,6 +318,11 @@ fn holds(values: &HashMap<(String, String), (f64, i64)>, c: &Cond, now: i64) -> 
                 "<=" => *v <= c.value,
                 "==" => (*v - c.value).abs() < 1e-9,
                 "!=" => (*v - c.value).abs() >= 1e-9,
+                // inclusive; a > b wraps (e.g. 23:00..07:00 on the clock)
+                "between" => {
+                    let b = c.value2.unwrap_or(c.value);
+                    if c.value <= b { *v >= c.value && *v <= b } else { *v >= c.value || *v <= b }
+                }
                 _ => false,
             },
         },
@@ -407,7 +428,7 @@ mod tests {
     fn rule(op: &str, value: f64, for_s: u64) -> Rule {
         Rule {
             id: "r".into(), name: "r".into(), enabled: true,
-            when: Cond { device: "inverter".into(), metric: "grid_v".into(), op: op.into(), value },
+            when: Cond { device: "inverter".into(), metric: "grid_v".into(), op: op.into(), value, value2: None },
             and: vec![], for_s, cooldown_s: 0,
             then: vec![Action { kind: "log".into(), board: None, path: None, action: None, value: None, message: Some("x".into()), delay_s: 0 }],
             on_clear: vec![Action { kind: "log".into(), board: None, path: None, action: None, value: None, message: Some("y".into()), delay_s: 0 }],
@@ -438,6 +459,19 @@ mod tests {
     fn hold_time() {
         let mut g = inner(vec![rule("<", 150.0, 3600)]);
         assert!(feed(&mut g, 0.0).is_empty(), "must hold for an hour first");
+    }
+
+    #[test]
+    fn clock_between_wraps() {
+        let mut r = rule("between", 23.0 * 60.0, 0);
+        r.when = Cond { device: "clock".into(), metric: "minute".into(), op: "between".into(), value: 23.0 * 60.0, value2: Some(7.0 * 60.0) };
+        let mut g = inner(vec![r]);
+        let at = |g: &mut Inner, min: i64| { g.values.insert(("clock".into(), "minute".into()), (min as f64, now_ts())); evaluate(g, None) };
+        assert!(at(&mut g, 22 * 60).is_empty());
+        assert_eq!(at(&mut g, 23 * 60 + 5).len(), 1, "23:05 is inside 23:00–07:00");
+        assert!(at(&mut g, 3 * 60).is_empty(), "still inside, fires once");
+        let c = at(&mut g, 7 * 60 + 1);
+        assert!(c.len() == 1 && c[0].1, "07:01 → on_clear");
     }
 
     #[test]

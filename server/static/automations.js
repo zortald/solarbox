@@ -5,9 +5,16 @@
   const { $, esc, api, toast, requireAdmin, page } = SB;
   let rules = [], state = {}, log = [], catalog = [], editing = null, timer = null;
 
-  const OPS = [['<', 'меньше'], ['>', 'больше'], ['<=', '≤'], ['>=', '≥'], ['==', 'равно'], ['!=', 'не равно'], ['changed', 'изменилось'], ['stale', 'нет данных, с']];
+  const OPS = [['<', 'меньше'], ['>', 'больше'], ['<=', '≤'], ['>=', '≥'], ['==', 'равно'], ['!=', 'не равно'], ['between', 'между'], ['changed', 'изменилось'], ['stale', 'нет данных, с']];
+  // Virtual devices the server provides: local clock and today's energy (kWh).
+  const VIRTUAL = { clock: ['minute', 'weekday'], energy: ['pv_today', 'load_today', 'grid_today', 'chg_today', 'dis_today'] };
+  const VLABEL = { minute: 'время суток', weekday: 'день недели', pv_today: 'солнце, кВт·ч', load_today: 'дом, кВт·ч', grid_today: 'из сети ≈, кВт·ч', chg_today: 'в АКБ, кВт·ч', dis_today: 'из АКБ, кВт·ч' };
+  const DEVLABEL = { clock: 'Время', energy: 'Энергия за сегодня', inverter: 'Инвертор', bms: 'АКБ / BMS' };
+  const DOW = ['пн', 'вт', 'ср', 'чт', 'пт', 'сб', 'вс'];
+  const hm = (m) => `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(Math.round(m % 60)).padStart(2, '0')}`;
+  const toMin = (t) => { const [h, m] = (t || '0:0').split(':').map(Number); return (h || 0) * 60 + (m || 0); };
   const opLabel = (o) => (OPS.find(([k]) => k === o) || [, o])[1];
-  const label = (m) => (SB.metricLabel ? SB.metricLabel(m) : m);
+  const label = (m) => VLABEL[m] || (SB.metricLabel ? SB.metricLabel(m) : m);
 
   // Ready-made board actions; config.json → ui.action_presets adds/overrides.
   const PRESETS = () => Object.assign({
@@ -23,6 +30,11 @@
   }, SB.cfg.ui?.action_presets || {});
 
   const TEMPLATES = [
+    { name: 'Ночью от сети (23:00–07:00), днём SBU', when: { device: 'clock', metric: 'minute', op: 'between', value: 23 * 60, value2: 7 * 60 }, cooldown_s: 60,
+      then: [{ kind: 'board', ...PRESETS().out_utility }, { kind: 'telegram', message: '🌙 23:00 — выход переключён на сеть' }],
+      on_clear: [{ kind: 'board', ...PRESETS().out_sbu }, { kind: 'telegram', message: '☀ 07:00 — выход переключён на SBU' }] },
+    { name: 'Каждый день в 21:00 — сводка в Telegram', when: { device: 'clock', metric: 'minute', op: '==', value: 21 * 60 }, cooldown_s: 3600,
+      then: [{ kind: 'telegram', message: '📊 За сегодня: ☀ {energy.pv_today} кВт·ч · 🏠 {energy.load_today} · ⚡ из сети ≈{energy.grid_today} · 🔋 +{energy.chg_today}/−{energy.dis_today}. АКБ сейчас {bms.soc}%' }] },
     { name: 'Пропала сеть → Telegram', when: { device: 'inverter', metric: 'grid_v', op: '<', value: 150 }, for_s: 10, cooldown_s: 60,
       then: [{ kind: 'telegram', message: '⚡ Пропала сеть. АКБ {bms.soc}%, дом {inverter.ac_out_w} Вт' }],
       on_clear: [{ kind: 'telegram', message: '✅ Сеть вернулась ({inverter.grid_v} В). АКБ {bms.soc}%' }] },
@@ -40,8 +52,15 @@
   ];
 
   const newId = () => 'r' + Date.now().toString(36);
-  const cond = (c) => c.op === 'stale' ? `${c.device}: нет данных ${c.metric === '*' ? '' : '«' + label(c.metric) + '» '}дольше ${c.value} с`
-    : c.op === 'changed' ? `${c.device}: изменилось «${label(c.metric)}»` : `${c.device}: ${label(c.metric)} ${opLabel(c.op)} ${c.value}`;
+  const cond = (c) => {
+    if (c.device === 'clock' && c.metric === 'minute') return c.op === 'between' ? `с ${hm(c.value)} до ${hm(c.value2 ?? c.value)}` : c.op === '==' ? `в ${hm(c.value)}` : `время ${opLabel(c.op)} ${hm(c.value)}`;
+    if (c.device === 'clock' && c.metric === 'weekday') return c.op === 'between' ? `${DOW[c.value - 1] || '?'}–${DOW[(c.value2 ?? c.value) - 1] || '?'}` : `день ${opLabel(c.op)} ${DOW[c.value - 1] || c.value}`;
+    const dev = DEVLABEL[c.device] || c.device;
+    if (c.op === 'stale') return `${dev}: нет данных ${c.metric === '*' ? '' : '«' + label(c.metric) + '» '}дольше ${c.value} с`;
+    if (c.op === 'changed') return `${dev}: изменилось «${label(c.metric)}»`;
+    if (c.op === 'between') return `${dev}: ${label(c.metric)} от ${c.value} до ${c.value2}`;
+    return `${dev}: ${label(c.metric)} ${opLabel(c.op)} ${c.value}`;
+  };
   const actText = (a) => a.kind === 'telegram' ? '✉ ' + a.message : a.kind === 'log' ? '📝 ' + (a.message || '') :
     (Object.values(PRESETS()).find((p) => p.path === a.path && p.action === a.action && (p.value ?? null) === (a.value ?? null))?.label || `${a.board}: ${a.action} ${a.path}${a.value ? ' = ' + a.value : ''}`);
   const when = (ts) => (ts ? new Date(ts * 1000).toLocaleString('ru') : 'ещё не было');
@@ -89,15 +108,19 @@
   }
 
   // ---- editor ----
-  const devices = () => [...new Set([...catalog.map((c) => c.device), ...Object.keys(SB.BOARDS)])];
-  const metrics = (dev) => catalog.filter((c) => c.device === dev).map((c) => c.metric);
+  const devices = () => [...new Set([...catalog.map((c) => c.device), ...Object.keys(SB.BOARDS), ...Object.keys(VIRTUAL)])];
+  const metrics = (dev) => VIRTUAL[dev] || catalog.filter((c) => c.device === dev).map((c) => c.metric);
   function condRow(c, i, key) {
-    const ms = metrics(c.device);
+    const ms = metrics(c.device), isTime = c.device === 'clock' && c.metric === 'minute', isDow = c.device === 'clock' && c.metric === 'weekday';
+    const ops = c.device === 'clock' ? OPS.filter(([k]) => !['changed', 'stale'].includes(k)) : OPS;
+    const val = (f, v) => isTime ? `<input type="time" data-f="${f}" value="${hm(v ?? 0)}">`
+      : isDow ? `<select data-f="${f}">${DOW.map((d, j) => `<option value="${j + 1}"${j + 1 === +(v ?? 1) ? ' selected' : ''}>${d}</option>`).join('')}</select>`
+      : `<input type="number" step="any" data-f="${f}" value="${v ?? 0}">`;
     return `<div class="crow" data-key="${key}" data-i="${i}">
-      <select data-f="device">${devices().map((d) => `<option${d === c.device ? ' selected' : ''}>${esc(d)}</option>`).join('')}</select>
-      <select data-f="metric"><option value="*"${c.metric === '*' ? ' selected' : ''}>(любой)</option>${ms.map((m) => `<option value="${esc(m)}"${m === c.metric ? ' selected' : ''}>${esc(label(m))}</option>`).join('')}</select>
-      <select data-f="op">${OPS.map(([k, t]) => `<option value="${k}"${k === c.op ? ' selected' : ''}>${t}</option>`).join('')}</select>
-      <input type="number" step="any" data-f="value" value="${c.value ?? 0}">
+      <select data-f="device">${devices().map((d) => `<option value="${esc(d)}"${d === c.device ? ' selected' : ''}>${esc(DEVLABEL[d] || d)}</option>`).join('')}</select>
+      <select data-f="metric">${VIRTUAL[c.device] ? '' : `<option value="*"${c.metric === '*' ? ' selected' : ''}>(любой)</option>`}${ms.map((m) => `<option value="${esc(m)}"${m === c.metric ? ' selected' : ''}>${esc(label(m))}</option>`).join('')}</select>
+      <select data-f="op">${ops.map(([k, t]) => `<option value="${k}"${k === c.op ? ' selected' : ''}>${isTime && k === '==' ? 'в' : t}</option>`).join('')}</select>
+      ${val('value', c.value)}${c.op === 'between' ? ' и ' + val('value2', c.value2) : ''}
       ${key === 'and' ? `<button class="btn" data-rm="and" data-i="${i}">✕</button>` : ''}</div>`;
   }
   function actRow(a, i, key) {
@@ -134,8 +157,14 @@
       r.for_s = +$('#e-for').value || 0; r.cooldown_s = +$('#e-cool').value || 0;
       document.querySelectorAll('.crow').forEach((row) => {
         const c = row.dataset.key === 'when' ? r.when : r.and[+row.dataset.i];
-        c.device = row.querySelector('[data-f=device]').value; c.metric = row.querySelector('[data-f=metric]').value;
-        c.op = row.querySelector('[data-f=op]').value; c.value = +row.querySelector('[data-f=value]').value || 0;
+        const dev = row.querySelector('[data-f=device]').value, devChanged = dev !== c.device;
+        c.device = dev;
+        c.metric = devChanged && VIRTUAL[dev] ? VIRTUAL[dev][0] : row.querySelector('[data-f=metric]').value;
+        c.op = row.querySelector('[data-f=op]').value;
+        const num = (f) => { const e = row.querySelector(`[data-f=${f}]`); if (!e) return undefined; return e.type === 'time' ? toMin(e.value) : +e.value || 0; };
+        c.value = num('value') ?? 0;
+        if (c.op === 'between') c.value2 = num('value2') ?? c.value; else delete c.value2;
+        if (devChanged && dev === 'clock') { c.op = '=='; c.value = 23 * 60; }
       });
       document.querySelectorAll('.arow').forEach((row) => {
         const list = r[row.dataset.key], i = +row.dataset.i, k = row.querySelector('[data-f=kind]').value, P = PRESETS();
@@ -147,7 +176,7 @@
       });
     };
     const wire = () => {
-      el.querySelectorAll('select[data-f=device], select[data-f=kind]').forEach((s) => (s.onchange = () => { read(); draw(); }));
+      el.querySelectorAll('select[data-f=device], select[data-f=metric], select[data-f=op], select[data-f=kind]').forEach((s) => (s.onchange = () => { read(); draw(); }));
       $('#e-add-and').onclick = () => { read(); (r.and ||= []).push({ device: r.when.device, metric: r.when.metric, op: '>', value: 0 }); draw(); };
       el.querySelectorAll('[data-add]').forEach((b) => (b.onclick = () => { read(); (r[b.dataset.add] ||= []).push({ kind: 'telegram', message: '' }); draw(); }));
       el.querySelectorAll('[data-rm]').forEach((b) => (b.onclick = () => { read(); r[b.dataset.rm].splice(+b.dataset.i, 1); draw(); }));

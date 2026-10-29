@@ -9,11 +9,13 @@ mod automations;
 mod boards;
 mod config;
 mod db;
+mod energy;
 mod files;
 mod ota;
 mod outages;
 mod sysinfo;
 mod telegram;
+mod tz;
 
 use axum::{
     extract::{DefaultBodyLimit, Json, Path, Query, State},
@@ -59,6 +61,8 @@ struct AppState {
     tg: Arc<telegram::Store>,
     /// Power outage detector (grid voltage on inverter packets).
     outages: Arc<outages::Detector>,
+    /// Daily energy integrator.
+    energy: Arc<energy::Energy>,
 }
 
 #[derive(RustEmbed)]
@@ -111,7 +115,22 @@ async fn main() {
         autom: Arc::new(automations::Engine::open(PathBuf::from(env("SOLARBOX_AUTOMATIONS", "/data/automations.json")))),
         tg: Arc::new(telegram::Store::open(PathBuf::from(env("SOLARBOX_SECRETS", "/data/secrets.json")))),
         outages: outage_detector,
+        energy: Arc::new(energy::Energy::new()),
     };
+    {
+        let c = db.lock().unwrap();
+        let tz = state.config.get().timezone;
+        let _ = energy::init(&c);
+        match energy::backfill(&c, &tz) {
+            Ok(n) if n > 0 => eprintln!("[energy] rebuilt daily totals from history ({n} steps)"),
+            Ok(_) => {}
+            Err(e) => eprintln!("[energy] backfill: {e}"),
+        }
+        let today = energy::day_totals(&c, &tz.day(now()));
+        for k in energy::KEYS {
+            state.autom.set_value("energy", &format!("{k}_today"), today.get(k).copied().unwrap_or(0.0), now());
+        }
+    }
     state.autom.attach_db(db.clone());
     telegram::spawn_bot(state.clone());
     {
@@ -120,7 +139,7 @@ async fn main() {
         tokio::spawn(async move {
             loop {
                 tokio::time::sleep(Duration::from_secs(1)).await;
-                for (rule, clear) in st.autom.tick() {
+                for (rule, clear) in st.autom.tick(&st.config.get().timezone) {
                     tokio::spawn(automations::execute(st.clone(), rule, clear));
                 }
             }
@@ -178,6 +197,7 @@ async fn main() {
         .route("/api/series", get(series))
         .route("/api/stream", get(stream))
         .route("/api/outages", get(outages::list))
+        .route("/api/energy", get(energy::api))
         .route("/api/outages/import", post(outages_import))
         .route("/api/outages/:start", axum::routing::delete(outages_delete))
         .route("/api/catalog", get(catalog))
@@ -198,6 +218,8 @@ async fn main() {
         .route("/api/automations/:id/run", post(autom_run))
         .route("/api/telegram", get(tg_get).put(tg_put))
         .route("/api/telegram/test", post(tg_test))
+        .route("/api/telegram/chats", post(tg_chat_add))
+        .route("/api/telegram/chats/:id", axum::routing::delete(tg_chat_del))
         .route("/api/files/:name", axum::routing::put(files::put).delete(files::delete))
         .route("/healthz", get(|| async { "ok" }))
         .route("/", get(|State(st): State<AppState>| async move { files::serve(&st, "index.html") }))
@@ -276,6 +298,17 @@ async fn ingest(State(st): State<AppState>, headers: HeaderMap, Json(body): Json
                     let _ = st.bus.send(
                         serde_json::json!({ "device": it.device, "ts": ts, "metrics": it.metrics }).to_string(),
                     );
+                    let tz = st.config.get().timezone;
+                    let deltas = st.energy.feed(&it.device, ts, &it.metrics, &tz);
+                    if !deltas.is_empty() {
+                        if let Err(e) = energy::store(&c, &deltas) {
+                            eprintln!("[energy] {e}");
+                        }
+                        let today = energy::day_totals(&c, &tz.day(now()));
+                        for k in energy::KEYS {
+                            st.autom.set_value("energy", &format!("{k}_today"), today.get(k).copied().unwrap_or(0.0), ts);
+                        }
+                    }
                     for (rule, clear) in st.autom.on_packet(&it.device, ts, &it.metrics) {
                         tokio::spawn(automations::execute(st.clone(), rule, clear));
                     }
@@ -413,30 +446,85 @@ fn need_admin() -> Response {
     (StatusCode::UNAUTHORIZED, Json(serde_json::json!({ "ok": false, "error": "admin password required" }))).into_response()
 }
 
-/// Whether Telegram is configured (the token itself is never returned).
+/// Telegram status (the token itself is never returned): bot, people, pending requests.
 async fn tg_get(State(st): State<AppState>, h: HeaderMap) -> Response {
     if !admin_header(&st, &h) { return need_admin(); }
     let t = st.tg.get();
-    Json(serde_json::json!({ "token_set": t.is_some(), "chat_id": t.map(|t| t.chat_id).filter(|c| !c.is_empty()) })).into_response()
+    Json(serde_json::json!({
+        "token_set": t.is_some(),
+        "bot": t.as_ref().and_then(|t| t.bot.clone()),
+        "chats": t.map(|t| t.chats).unwrap_or_default(),
+        "pending": st.tg.pending(),
+    }))
+    .into_response()
 }
 
 #[derive(Deserialize)]
-struct TgBody { token: Option<String>, chat_id: Option<String>, #[serde(default)] disable: bool }
+struct TgBody { token: Option<String>, #[serde(default)] disable: bool }
 
-/// Set bot token and/or chat id (empty/missing field keeps the stored one);
-/// `{"disable": true}` forgets both.
+/// Save a bot token (validated via getMe, command menu registered), or
+/// `{"disable": true}` to forget everything.
 async fn tg_put(State(st): State<AppState>, h: HeaderMap, Json(b): Json<TgBody>) -> Response {
     if !admin_header(&st, &h) { return need_admin(); }
-    let cur = st.tg.get();
-    let pick = |new: Option<String>, old: Option<String>| new.map(|x| x.trim().to_string()).filter(|x| !x.is_empty()).or(old);
-    let token = pick(b.token, cur.as_ref().map(|t| t.token.clone()));
-    let chat = pick(b.chat_id, cur.as_ref().map(|t| t.chat_id.clone()).filter(|c| !c.is_empty())).unwrap_or_default();
-    let new = match (b.disable, token) {
-        (true, _) => None,
-        (false, Some(token)) => Some(telegram::Tg { token, chat_id: chat }),
-        (false, None) => return (StatusCode::BAD_REQUEST, Json(serde_json::json!({ "ok": false, "error": "нужен токен бота" }))).into_response(),
+    if b.disable {
+        return match st.tg.set(None) {
+            Ok(_) => Json(serde_json::json!({ "ok": true })).into_response(),
+            Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({ "ok": false, "error": e }))).into_response(),
+        };
+    }
+    let Some(token) = b.token.map(|t| t.trim().to_string()).filter(|t| !t.is_empty()) else {
+        return (StatusCode::BAD_REQUEST, Json(serde_json::json!({ "ok": false, "error": "нужен токен бота" }))).into_response();
     };
-    match st.tg.set(new) {
+    let tk = token.clone();
+    let bot = match tokio::task::spawn_blocking(move || telegram::setup_bot(&tk)).await {
+        Ok(Ok(u)) => u,
+        Ok(Err(e)) => return (StatusCode::BAD_REQUEST, Json(serde_json::json!({ "ok": false, "error": format!("токен не подошёл: {e}") }))).into_response(),
+        Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({ "ok": false, "error": e.to_string() }))).into_response(),
+    };
+    let chats = st.tg.get().map(|t| t.chats).unwrap_or_default();
+    let mut tg = telegram::Tg::default();
+    tg.token = token;
+    tg.chats = chats;
+    tg.bot = Some(bot.clone());
+    match st.tg.set(Some(tg)) {
+        Ok(_) => Json(serde_json::json!({ "ok": true, "bot": bot })).into_response(),
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({ "ok": false, "error": e }))).into_response(),
+    }
+}
+
+#[derive(Deserialize)]
+struct ChatAdd { id: String }
+
+/// Allow a chat: from the pending requests, or any chat id (name looked up).
+async fn tg_chat_add(State(st): State<AppState>, h: HeaderMap, Json(b): Json<ChatAdd>) -> Response {
+    if !admin_header(&st, &h) { return need_admin(); }
+    let Some(mut t) = st.tg.get() else {
+        return (StatusCode::BAD_REQUEST, Json(serde_json::json!({ "ok": false, "error": "сначала токен бота" }))).into_response();
+    };
+    let id = b.id.trim().to_string();
+    if id.is_empty() || t.chats.iter().any(|c| c.id == id) {
+        return Json(serde_json::json!({ "ok": true, "note": "уже в списке" })).into_response();
+    }
+    let chat = match st.tg.take_pending(&id) {
+        Some(c) => c,
+        None => {
+            let (tk, i) = (t.token.clone(), id.clone());
+            tokio::task::spawn_blocking(move || telegram::chat_info(&tk, &i)).await.ok().flatten()
+                .unwrap_or(telegram::Chat { id: id.clone(), name: String::new(), username: None })
+        }
+    };
+    t.chats.push(chat.clone());
+    match st.tg.set(Some(t)) {
+        Ok(_) => Json(serde_json::json!({ "ok": true, "chat": chat })).into_response(),
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({ "ok": false, "error": e }))).into_response(),
+    }
+}
+
+async fn tg_chat_del(State(st): State<AppState>, Path(id): Path<String>, h: HeaderMap) -> Response {
+    if !admin_header(&st, &h) { return need_admin(); }
+    let Some(mut t) = st.tg.get() else { return Json(serde_json::json!({ "ok": true })).into_response() };
+    t.chats.retain(|c| c.id != id);
+    match st.tg.set(Some(t)) {
         Ok(_) => Json(serde_json::json!({ "ok": true })).into_response(),
         Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({ "ok": false, "error": e }))).into_response(),
     }

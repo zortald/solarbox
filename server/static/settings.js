@@ -60,18 +60,36 @@
     const el = $('#set-tg');
     if (!SB.isAdmin) { el.innerHTML = '<p class="muted small">Настройка Telegram — после входа («Войти» в меню).</p>'; return; }
     let t; try { t = await api('/api/telegram'); } catch (e) { el.textContent = e.message; return; }
-    el.innerHTML = `<p class="small">${t.token_set ? '✔ токен бота задан' : '✘ токен не задан'} · ${t.chat_id ? 'чат ' + esc(t.chat_id) : 'чат не указан'}</p>
-      <p class="muted small">1) Создай бота у @BotFather и вставь токен. 2) Напиши своему боту <code>/id</code> — он ответит номером чата, вставь его. 3) «Отправить тест». Потом в «Автоматизациях» появится действие «Сообщение в Telegram», а боту можно писать <code>/status</code>.</p>
-      <div class="row"><input type="password" id="tg-token" placeholder="${t.token_set ? 'токен (оставь пустым — не менять)' : '123456:ABC… токен бота'}" autocomplete="off">
-        <input id="tg-chat" placeholder="chat id" value="${esc(t.chat_id || '')}"></div>
-      <div class="row"><button class="btn on" id="tg-save">Сохранить</button><button class="btn" id="tg-test">Отправить тест</button>${t.token_set ? '<button class="btn" id="tg-off">Отключить</button>' : ''}</div>`;
+    const who = (c) => `<b>${esc(c.name || 'без имени')}</b>${c.username ? ` <span class="muted">@${esc(c.username)}</span>` : ''} <span class="muted small">· ${esc(c.id)}</span>`;
+    el.innerHTML = `
+      <p class="small">${t.token_set ? `✔ бот ${t.bot ? '<b>@' + esc(t.bot) + '</b>' : 'подключён'} · команды /status, /help, /id зарегистрированы` : '✘ бот не подключён'}</p>
+      <div class="row"><input type="password" id="tg-token" placeholder="${t.token_set ? 'новый токен (оставь пустым — не менять)' : 'токен от @BotFather, 123456:ABC…'}" autocomplete="off">
+        <button class="btn on" id="tg-save">${t.token_set ? 'Сменить токен' : 'Подключить'}</button></div>
+      ${t.token_set ? `
+      <h3>Получатели</h3>
+      ${t.chats.length ? t.chats.map((c) => `<div class="frow"><span>${who(c)}</span><span></span><button class="btn xs" data-tdel="${esc(c.id)}">✕</button></div>`).join('')
+        : '<p class="muted small">Пока никого. Напиши своему боту <code>/start</code> — появишься ниже в «Хотят доступ».</p>'}
+      ${t.pending.length ? `<h3>Хотят доступ</h3>` + t.pending.map((c) => `<div class="frow"><span>${who(c)}</span><span></span><button class="btn xs on" data-tadd="${esc(c.id)}">Добавить</button></div>`).join('') : ''}
+      <p class="muted small">Чтобы добавить человека: пусть напишет боту${t.bot ? ' <b>@' + esc(t.bot) + '</b>' : ''} <code>/start</code>, обнови эту страницу и нажми «Добавить». Уведомления приходят всем получателям; бот отвечает только им.</p>
+      <div class="row"><input id="tg-chat" placeholder="или chat id вручную"><button class="btn" id="tg-add">Добавить</button>
+        <button class="btn" id="tg-test">Отправить тест всем</button><button class="btn" id="tg-off">Отключить бота</button></div>` : ''}`;
     $('#tg-save').onclick = async () => {
-      try { await api('/api/telegram', { method: 'PUT', json: { token: $('#tg-token').value, chat_id: $('#tg-chat').value } }); toast('Сохранено'); tg(); }
+      const token = $('#tg-token').value.trim();
+      if (!token) return toast('Вставь токен бота', true);
+      try { const r = await api('/api/telegram', { method: 'PUT', json: { token } }); toast('Бот @' + r.bot + ' подключён, команды зарегистрированы'); tg(); }
       catch (e) { toast(e.message, true); }
     };
+    if (!t.token_set) return;
+    const add = async (id) => { try { await api('/api/telegram/chats', { method: 'POST', json: { id } }); toast('Добавлен'); tg(); } catch (e) { toast(e.message, true); } };
+    el.querySelectorAll('[data-tadd]').forEach((b) => (b.onclick = () => add(b.dataset.tadd)));
+    $('#tg-add').onclick = () => { const id = $('#tg-chat').value.trim(); if (id) add(id); };
+    el.querySelectorAll('[data-tdel]').forEach((b) => (b.onclick = async () => {
+      if (!(await SB.ask('Убрать этого получателя? Он перестанет получать уведомления и пользоваться ботом.'))) return;
+      try { await api('/api/telegram/chats/' + encodeURIComponent(b.dataset.tdel), { method: 'DELETE' }); toast('Убран'); tg(); } catch (e) { toast(e.message, true); }
+    }));
     $('#tg-test').onclick = async () => { try { await api('/api/telegram/test', { method: 'POST' }); toast('Отправлено — проверь Telegram'); } catch (e) { toast(e.message, true); } };
-    if ($('#tg-off')) $('#tg-off').onclick = async () => {
-      if (!(await SB.ask('Отключить Telegram и забыть токен?'))) return;
+    $('#tg-off').onclick = async () => {
+      if (!(await SB.ask('Отключить бота и забыть токен и получателей?'))) return;
       try { await api('/api/telegram', { method: 'PUT', json: { disable: true } }); toast('Отключено'); tg(); } catch (e) { toast(e.message, true); }
     };
   }

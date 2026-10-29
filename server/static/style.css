@@ -230,3 +230,17 @@ nav a { color: var(--muted); } nav a.on { color: var(--fg); }
 #admin.authed { background: transparent; border-color: var(--ok); color: var(--ok); }
 #admin.authed:hover { background: rgba(63,185,80,.1); }
 .adot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: var(--ok); margin-right: 7px; vertical-align: 1px; }
+
+/* main page: both columns start and end level */
+.flowtop { align-items: stretch; }
+.flowside { display: flex; flex-direction: column; gap: 12px; }
+.flowside > .panel:last-child { flex: 1; }
+.flow { display: flex; align-items: center; }
+
+/* statistics */
+.stab { width: 100%; border-collapse: collapse; font-size: 13px; font-variant-numeric: tabular-nums; }
+.stab th, .stab td { padding: 5px 6px; text-align: right; border-top: 1px solid var(--line); }
+.stab th:first-child, .stab td:first-child { text-align: left; color: var(--muted); }
+.stab th { font-weight: 600; border-top: 0; }
+.stab tr.tot td { font-weight: 700; }
+#st-tip { min-height: 18px; margin-top: 4px; }

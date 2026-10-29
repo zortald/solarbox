@@ -160,28 +160,16 @@
   const out_ = () => SB.outages?.data();
   const span = (s) => SB.outages.span(s);
 
-  // ---- today's energy, integrated from history (refreshed every 2 min) ----
+  // ---- today's energy: integrated on the server per packet (refresh every minute) ----
   let today = {}, todayAt = 0;
   async function energy() {
-    if (Date.now() - todayAt < 120000) return;
+    if (Date.now() - todayAt < 60000) return;
     todayAt = Date.now();
-    const mid = new Date(); mid.setHours(0, 0, 0, 0);
-    const from = Math.floor(mid / 1000), to = Math.floor(Date.now() / 1000);
-    const get = async (d, m) => { try { return await api(`/api/series?device=${d}&metric=${m}&from=${from}&to=${to}&points=288`); } catch (e) { return { ts: [], v: [] }; } };
-    const [pv, load, batt, gv] = await Promise.all([get('inverter', 'pv_w'), get('inverter', 'ac_out_w'), get('bms', 'bms_w'), get('inverter', 'grid_v')]);
-    // Each point is a bucket average; weight it by the gap to the next one (capped, so gaps don't count).
-    const integ = (s, f = (x) => x) => {
-      let wh = 0;
-      for (let i = 0; i < s.ts.length; i++) wh += f(s.v[i], s.ts[i]) * Math.min((s.ts[i + 1] ?? to) - s.ts[i], 900) / 3600;
-      return wh / 1000;
-    };
-    const at = (s) => { const m = new Map(); s.ts.forEach((t, i) => m.set(t, s.v[i])); return m; };
-    const P = at(pv), B = at(batt), G = at(gv);
-    today = {
-      pv: integ(pv), load: integ(load),
-      chg: integ(batt, (x) => Math.max(x, 0)), dis: integ(batt, (x) => Math.max(-x, 0)),
-      grid: integ(load, (x, t) => { const g = x + (B.get(t) ?? 0) - (P.get(t) ?? 0); return (G.get(t) ?? 0) > 150 && g > 40 ? g : 0; }),
-    };
+    try {
+      const d = await api('/api/energy?days=1');
+      const t = d.days.find((x) => x.day === d.today) || {};
+      today = { pv: t.pv ?? 0, load: t.load ?? 0, chg: t.chg ?? 0, dis: t.dis ?? 0, grid: t.grid ?? 0 };
+    } catch (e) { /* keep previous */ }
   }
 
   // ---- one combined chart; legend checkboxes hide series (remembered) ----

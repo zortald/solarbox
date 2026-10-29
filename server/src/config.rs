@@ -51,6 +51,9 @@ pub struct Config {
     /// Free-form UI settings (metric labels, page options) passed to the browser.
     #[serde(default)]
     pub ui: serde_json::Value,
+    /// Local time for daily energy, "today" and time-based automations.
+    #[serde(default)]
+    pub timezone: crate::tz::Tz,
 }
 
 fn d_read() -> Vec<String> {
@@ -86,7 +89,7 @@ impl Config {
             .into_iter()
             .map(|b| BoardCfg { name: b.name, host: b.host, web_port: b.web_port, ota_port: b.ota_port, ui: Default::default() })
             .collect();
-        Config { boards, read_domains: d_read(), actions: d_actions(), ui: serde_json::json!({}) }
+        Config { boards, read_domains: d_read(), actions: d_actions(), ui: serde_json::json!({}), timezone: Default::default() }
     }
 
     pub fn board(&self, name: &str) -> Option<&BoardCfg> {
