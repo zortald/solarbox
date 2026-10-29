@@ -96,5 +96,37 @@
     $('#flow-facts').innerHTML = rows.map(([k, x]) => `<div><span>${k}</span><b>${x}</b></div>`).join('');
   }
 
-  page('flow', { tick: render });
+  // ---- charts under the diagram ----
+  const SERIES = [
+    ['inverter', 'pv_w', 'Солнце', '#f5b041'],
+    ['inverter', 'ac_out_w', 'Дом', '#4ea3ff'],
+    ['bms', 'bms_w', 'АКБ (+ заряд / − разряд)', '#3fb950'],
+  ];
+  const RANGES = [['6ч', 21600], ['24ч', 86400], ['7д', 604800]];
+  let range = 86400, chartsAt = 0;
+
+  function rangeButtons() {
+    $('#fc-ranges').innerHTML = RANGES.map(([l, s]) => `<button class="btn${s === range ? ' on' : ''}" data-s="${s}">${l}</button>`).join('');
+    document.querySelectorAll('#fc-ranges button').forEach((b) => (b.onclick = () => { range = +b.dataset.s; rangeButtons(); chartsAt = 0; charts(); }));
+    $('#fc-legend').innerHTML = SERIES.map(([, , l, c]) => `<span><i style="background:${c}"></i>${l}</span>`).join('');
+  }
+
+  async function charts() {
+    if (Date.now() - chartsAt < 60000) return;
+    chartsAt = Date.now();
+    const to = Math.floor(Date.now() / 1000), from = to - range;
+    const get = async (dev, m) => { try { return await SB.api(`/api/series?device=${dev}&metric=${m}&from=${from}&to=${to}&points=400`); } catch (e) { return { ts: [], v: [] }; } };
+    const power = await Promise.all(SERIES.map(async ([dev, m, label, color]) => ({ ...(await get(dev, m)), color, label })));
+    Plot($('#fc-power'), { series: power, unit: 'Вт' });
+    const soc = await get('bms', 'soc');
+    Plot($('#fc-soc'), { series: [{ ...soc, color: '#3fb950' }], unit: '%' });
+  }
+
+  let resized;
+  window.addEventListener('resize', () => { clearTimeout(resized); resized = setTimeout(() => { if (!$('#page-flow').hidden) { chartsAt = 0; charts(); } }, 200); });
+
+  page('flow', {
+    show() { rangeButtons(); chartsAt = 0; },
+    tick() { render(); charts(); },
+  });
 })();

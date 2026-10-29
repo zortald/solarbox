@@ -27,7 +27,13 @@
     <section data-page="flow" id="page-flow">
       <div class="panel flow"><svg id="flow-svg" viewBox="0 0 360 290"></svg></div>
       <div class="panel facts" id="flow-facts"></div>
-      <p class="muted small">Мощность сети инвертор не сообщает — она оценена по балансу (≈).</p>
+      <div class="panel">
+        <div class="ph"><h2>Мощность</h2><div class="row" id="fc-ranges"></div></div>
+        <div class="legend" id="fc-legend"></div>
+        <canvas id="fc-power" class="tall"></canvas>
+      </div>
+      <div class="panel"><h2>Заряд АКБ</h2><canvas id="fc-soc"></canvas></div>
+      <p class="muted small">Мощность сети инвертор не сообщает — на схеме она оценена по балансу (≈), в графиках её нет.</p>
     </section>
 
     <section data-page="cells" id="page-cells" hidden>
