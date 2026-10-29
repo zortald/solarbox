@@ -20,6 +20,7 @@
       <a href="#inverter">Инвертор</a>
       <a href="#boards">Платы</a>
       <a href="#history">История</a>
+      <a href="#automations">Автоматизации</a>
       <a href="#settings">Настройки</a>
     </nav>
   </header>
@@ -74,10 +75,16 @@
       <div class="panel"><div class="row" id="h-ranges"></div><div id="h-metrics"></div></div>
       <div id="h-charts"></div>
     </section>
+    <section data-page="automations" id="page-automations" hidden>
+      <div class="panel"><h2>Правила</h2><div id="auto"></div></div>
+      <div class="panel"><h2>Журнал</h2><div id="auto-log"></div></div>
+    </section>
+
     <section data-page="settings" id="page-settings" hidden>
       <div class="panel"><h2>Ресурсы</h2><div class="facts wide" id="set-res"></div></div>
       <div class="panel"><h2>База данных</h2><div class="facts" id="set-db"></div>
         <h3>Прореживание истории</h3><div class="row" id="set-tiers"></div></div>
+      <div class="panel"><h2>Telegram</h2><div id="set-tg"></div></div>
       <div class="panel"><h2>Интерфейс</h2><div id="set-files"></div></div>
       <div class="panel"><h2>Конфигурация</h2><div id="set-config"></div></div>
     </section>
@@ -93,6 +100,7 @@
   <script src="/boards.js"></script>
   <script src="/history.js"></script>
   <script src="/settings.js"></script>
+  <script src="/automations.js"></script>
   <script>SB.start();</script>
 </body>
 </html>

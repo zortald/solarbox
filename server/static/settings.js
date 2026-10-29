@@ -56,8 +56,28 @@
       `<details><summary>config.json</summary><pre>${esc(JSON.stringify(Object.fromEntries(Object.entries(c).filter(([k]) => !['load_error', 'admin'].includes(k))), null, 2))}</pre></details>`;
   }
 
+  async function tg() {
+    const el = $('#set-tg');
+    if (!SB.isAdmin) { el.innerHTML = '<p class="muted small">Настройка Telegram — после входа (🔒 вверху).</p>'; return; }
+    let t; try { t = await api('/api/telegram'); } catch (e) { el.textContent = e.message; return; }
+    el.innerHTML = `<p class="small">${t.token_set ? '✔ токен бота задан' : '✘ токен не задан'} · ${t.chat_id ? 'чат ' + esc(t.chat_id) : 'чат не указан'}</p>
+      <p class="muted small">1) Создай бота у @BotFather и вставь токен. 2) Напиши своему боту <code>/id</code> — он ответит номером чата, вставь его. 3) «Отправить тест». Потом в «Автоматизациях» появится действие «Сообщение в Telegram», а боту можно писать <code>/status</code>.</p>
+      <div class="row"><input type="password" id="tg-token" placeholder="${t.token_set ? 'токен (оставь пустым — не менять)' : '123456:ABC… токен бота'}" autocomplete="off">
+        <input id="tg-chat" placeholder="chat id" value="${esc(t.chat_id || '')}"></div>
+      <div class="row"><button class="btn on" id="tg-save">Сохранить</button><button class="btn" id="tg-test">Отправить тест</button>${t.token_set ? '<button class="btn" id="tg-off">Отключить</button>' : ''}</div>`;
+    $('#tg-save').onclick = async () => {
+      try { await api('/api/telegram', { method: 'PUT', json: { token: $('#tg-token').value, chat_id: $('#tg-chat').value } }); toast('Сохранено'); tg(); }
+      catch (e) { toast(e.message, true); }
+    };
+    $('#tg-test').onclick = async () => { try { await api('/api/telegram/test', { method: 'POST' }); toast('Отправлено — проверь Telegram'); } catch (e) { toast(e.message, true); } };
+    if ($('#tg-off')) $('#tg-off').onclick = async () => {
+      if (!confirm('Отключить Telegram и забыть токен?')) return;
+      try { await api('/api/telegram', { method: 'PUT', json: { disable: true } }); toast('Отключено'); tg(); } catch (e) { toast(e.message, true); }
+    };
+  }
+
   page('settings', {
-    show() { system(); ui(); timer = setInterval(system, 5000); },
+    show() { system(); ui(); tg(); timer = setInterval(system, 5000); },
     hide() { clearInterval(timer); },
   });
 })();

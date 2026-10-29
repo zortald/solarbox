@@ -138,3 +138,20 @@ canvas.tall { height: 220px; }
 .frow { display: grid; grid-template-columns: 1fr auto auto; gap: 10px; align-items: center; padding: 5px 0; border-top: 1px solid var(--line); font-size: 13px; }
 pre { background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 10px; overflow: auto; font-size: 12px; max-height: 50vh; }
 details summary { cursor: pointer; color: var(--muted); }
+
+/* automations */
+.warn { color: var(--warn); }
+.arule { border-top: 1px solid var(--line); padding: 10px 0; display: grid; gap: 4px; }
+.arule.off { opacity: .55; }
+.ah { display: flex; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
+.aedit { display: grid; gap: 8px; }
+.aedit label { display: grid; gap: 4px; font-size: 13px; }
+.aedit input, .aedit textarea, .aedit select, .arow input, #set-tg input { background: var(--bg); color: var(--fg); border: 1px solid var(--line); border-radius: 8px; padding: 6px 8px; font: inherit; font-size: 13px; }
+.crow, .arow { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; padding: 6px; background: var(--panel2); border-radius: 8px; }
+.crow input[type=number] { width: 90px; }
+.arow textarea { flex: 1 1 100%; resize: vertical; }
+.arow label { display: inline-flex; gap: 4px; align-items: center; }
+.arow label input { width: 70px; }
+.lrow { display: grid; grid-template-columns: 150px 180px 1fr; gap: 10px; font-size: 12px; padding: 4px 0; border-top: 1px solid var(--line); }
+@media (max-width: 600px) { .lrow { grid-template-columns: 1fr; gap: 0; } }
+#set-tg .row { margin-top: 6px; } #set-tg input { min-width: 220px; }

@@ -50,7 +50,7 @@ fn err(code: StatusCode, msg: impl Into<String>) -> Response {
     (code, Json(serde_json::json!({ "ok": false, "error": msg.into() }))).into_response()
 }
 
-fn find(st: &AppState, name: &str) -> Option<Board> {
+pub(crate) fn find(st: &AppState, name: &str) -> Option<Board> {
     st.config.get().board(name).map(|b| Board {
         name: b.name.clone(),
         host: b.host.clone(),
@@ -93,7 +93,7 @@ pub fn pct(s: &str) -> String {
 
 /// Minimal HTTP/1.1 request to a board (plain HTTP on the LAN, Connection:
 /// close). Returns status and body.
-async fn http(b: &Board, method: &str, path: &str) -> Result<(u16, String), String> {
+pub(crate) async fn http(b: &Board, method: &str, path: &str) -> Result<(u16, String), String> {
     let mut s = timeout(Duration::from_secs(4), TcpStream::connect((b.host.as_str(), b.web_port)))
         .await
         .map_err(|_| "board unreachable (connect timeout)".to_string())?

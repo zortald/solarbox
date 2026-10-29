@@ -5,12 +5,14 @@
 //! `/api/series` and `/api/catalog`. The whole thing is one static binary with
 //! the UI baked in, meant to sit in a container on the site's router.
 
+mod automations;
 mod boards;
 mod config;
 mod db;
 mod files;
 mod ota;
 mod sysinfo;
+mod telegram;
 
 use axum::{
     extract::{DefaultBodyLimit, Json, Path, Query, State},
@@ -51,6 +53,9 @@ struct AppState {
     retention_days: i64,
     /// Every ingested packet is re-broadcast to open dashboards (SSE).
     bus: tokio::sync::broadcast::Sender<String>,
+    /// Automation rules + their runtime state and journal.
+    autom: Arc<automations::Engine>,
+    tg: Arc<telegram::Store>,
 }
 
 #[derive(RustEmbed)]
@@ -97,7 +102,22 @@ async fn main() {
         db_path: db_path.clone(),
         retention_days,
         bus: tokio::sync::broadcast::channel(64).0,
+        autom: Arc::new(automations::Engine::open(PathBuf::from(env("SOLARBOX_AUTOMATIONS", "/data/automations.json")))),
+        tg: Arc::new(telegram::Store::open(PathBuf::from(env("SOLARBOX_SECRETS", "/data/secrets.json")))),
     };
+    telegram::spawn_bot(state.clone());
+    {
+        // Hold times / staleness need a clock even without new packets.
+        let st = state.clone();
+        tokio::spawn(async move {
+            loop {
+                tokio::time::sleep(Duration::from_secs(1)).await;
+                for (rule, clear) in st.autom.tick() {
+                    tokio::spawn(automations::execute(st.clone(), rule, clear));
+                }
+            }
+        });
+    }
     {
         let sys = state.sys.clone();
         tokio::spawn(async move {
@@ -158,6 +178,10 @@ async fn main() {
         .route("/api/config", get(files::get_config).put(files::put_config))
         .route("/api/files", get(files::list))
         .route("/api/system", get(sysinfo::system))
+        .route("/api/automations", get(autom_get).put(autom_put))
+        .route("/api/automations/:id/run", post(autom_run))
+        .route("/api/telegram", get(tg_get).put(tg_put))
+        .route("/api/telegram/test", post(tg_test))
         .route("/api/files/:name", axum::routing::put(files::put).delete(files::delete))
         .route("/healthz", get(|| async { "ok" }))
         .route("/", get(|State(st): State<AppState>| async move { files::serve(&st, "index.html") }))
@@ -226,6 +250,9 @@ async fn ingest(State(st): State<AppState>, headers: HeaderMap, Json(body): Json
                     let _ = st.bus.send(
                         serde_json::json!({ "device": it.device, "ts": ts, "metrics": it.metrics }).to_string(),
                     );
+                    for (rule, clear) in st.autom.on_packet(&it.device, ts, &it.metrics) {
+                        tokio::spawn(automations::execute(st.clone(), rule, clear));
+                    }
                 }
                 Err(e) => {
                     eprintln!("[ingest] {e}");
@@ -314,6 +341,87 @@ fn parse_tiers(s: &str) -> Option<Vec<db::Tier>> {
     }
     v.sort_by_key(|t| t.min_age);
     Some(v)
+}
+
+// ---- automations ----------------------------------------------------------
+
+fn admin_header(st: &AppState, h: &HeaderMap) -> bool {
+    matches!((&st.admin, h.get("x-admin").and_then(|v| v.to_str().ok())), (Some(p), Some(v)) if p == v)
+}
+
+async fn autom_get(State(st): State<AppState>, h: HeaderMap) -> Response {
+    if !admin_header(&st, &h) {
+        return (StatusCode::UNAUTHORIZED, Json(serde_json::json!({ "ok": false, "error": "admin password required" }))).into_response();
+    }
+    Json(st.autom.snapshot()).into_response()
+}
+
+async fn autom_put(State(st): State<AppState>, h: HeaderMap, body: String) -> Response {
+    if !admin_header(&st, &h) {
+        return (StatusCode::UNAUTHORIZED, Json(serde_json::json!({ "ok": false, "error": "admin password required" }))).into_response();
+    }
+    match st.autom.save(&body) {
+        Ok(n) => Json(serde_json::json!({ "ok": true, "rules": n })).into_response(),
+        Err(e) => (StatusCode::BAD_REQUEST, Json(serde_json::json!({ "ok": false, "error": e }))).into_response(),
+    }
+}
+
+/// Run a rule's actions now (test button), regardless of its condition.
+async fn autom_run(State(st): State<AppState>, Path(id): Path<String>, h: HeaderMap) -> Response {
+    if !admin_header(&st, &h) {
+        return (StatusCode::UNAUTHORIZED, Json(serde_json::json!({ "ok": false, "error": "admin password required" }))).into_response();
+    }
+    match st.autom.rule(&id) {
+        Some(r) => {
+            st.autom.log(&r.name, "ручной запуск");
+            tokio::spawn(automations::execute(st.clone(), r, false));
+            Json(serde_json::json!({ "ok": true })).into_response()
+        }
+        None => (StatusCode::NOT_FOUND, Json(serde_json::json!({ "ok": false, "error": "no such rule" }))).into_response(),
+    }
+}
+
+// ---- telegram ---------------------------------------------------------------
+
+fn need_admin() -> Response {
+    (StatusCode::UNAUTHORIZED, Json(serde_json::json!({ "ok": false, "error": "admin password required" }))).into_response()
+}
+
+/// Whether Telegram is configured (the token itself is never returned).
+async fn tg_get(State(st): State<AppState>, h: HeaderMap) -> Response {
+    if !admin_header(&st, &h) { return need_admin(); }
+    let t = st.tg.get();
+    Json(serde_json::json!({ "token_set": t.is_some(), "chat_id": t.map(|t| t.chat_id).filter(|c| !c.is_empty()) })).into_response()
+}
+
+#[derive(Deserialize)]
+struct TgBody { token: Option<String>, chat_id: Option<String>, #[serde(default)] disable: bool }
+
+/// Set bot token and/or chat id (empty/missing field keeps the stored one);
+/// `{"disable": true}` forgets both.
+async fn tg_put(State(st): State<AppState>, h: HeaderMap, Json(b): Json<TgBody>) -> Response {
+    if !admin_header(&st, &h) { return need_admin(); }
+    let cur = st.tg.get();
+    let pick = |new: Option<String>, old: Option<String>| new.map(|x| x.trim().to_string()).filter(|x| !x.is_empty()).or(old);
+    let token = pick(b.token, cur.as_ref().map(|t| t.token.clone()));
+    let chat = pick(b.chat_id, cur.as_ref().map(|t| t.chat_id.clone()).filter(|c| !c.is_empty())).unwrap_or_default();
+    let new = match (b.disable, token) {
+        (true, _) => None,
+        (false, Some(token)) => Some(telegram::Tg { token, chat_id: chat }),
+        (false, None) => return (StatusCode::BAD_REQUEST, Json(serde_json::json!({ "ok": false, "error": "нужен токен бота" }))).into_response(),
+    };
+    match st.tg.set(new) {
+        Ok(_) => Json(serde_json::json!({ "ok": true })).into_response(),
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({ "ok": false, "error": e }))).into_response(),
+    }
+}
+
+async fn tg_test(State(st): State<AppState>, h: HeaderMap) -> Response {
+    if !admin_header(&st, &h) { return need_admin(); }
+    match telegram::send(&st, "✅ solarbox на связи".into()).await {
+        Ok(_) => Json(serde_json::json!({ "ok": true })).into_response(),
+        Err(e) => (StatusCode::BAD_GATEWAY, Json(serde_json::json!({ "ok": false, "error": e }))).into_response(),
+    }
 }
 
 // ---- live stream ----------------------------------------------------------

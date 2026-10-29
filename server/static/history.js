@@ -41,6 +41,7 @@
   const RANGES = [['1ч', 3600], ['6ч', 21600], ['24ч', 86400], ['7д', 604800], ['30д', 2592000]];
   // config.json → ui.metrics overrides/extends these labels live.
   const meta = (m) => Object.assign({ label: m, unit: '', color: '#4ea3ff' }, META[m], SB.cfg.ui.metrics?.[m]);
+  SB.metricLabel = (m) => meta(m).label;
   const state = { range: 21600, selected: new Set(['inverter/pv_w', 'inverter/ac_out_w', 'bms/soc', 'bms/bms_w']), catalog: [] };
   let timer = null;
 
