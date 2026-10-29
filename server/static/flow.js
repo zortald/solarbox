@@ -180,39 +180,59 @@
     };
   }
 
-  // ---- charts: one per metric, each on its own scale (like «История») ----
-  const CHARTS = [
-    ['inverter', 'pv_w', 'Солнце', 'Вт', '#f5b041'],
-    ['inverter', 'ac_out_w', 'Дом', 'Вт', '#ff9eb5'],
-    ['bms', 'bms_w', 'АКБ (+ заряд / − разряд)', 'Вт', '#3fb950'],
-    ['bms', 'soc', 'Заряд АКБ', '%', '#3fb950'],
+  // ---- one combined chart; legend checkboxes hide series (remembered) ----
+  const CHART = [
+    { k: 'pv', d: 'inverter', m: 'pv_w', label: 'Солнце', unit: 'Вт', color: '#f5b041' },
+    { k: 'load', d: 'inverter', m: 'ac_out_w', label: 'Дом', unit: 'Вт', color: '#ff9eb5' },
+    { k: 'batt', d: 'bms', m: 'bms_w', label: 'АКБ ±', unit: 'Вт', color: '#3fb950' },
+    { k: 'soc', d: 'bms', m: 'soc', label: 'Заряд АКБ', unit: '%', color: '#56d4dd', axis: 'right', fixed: [0, 100] },
   ];
-  const RANGES = [['6ч', 21600], ['24ч', 86400], ['7д', 604800]];
-  let range = 86400, chartsAt = 0;
-  function rangeButtons() {
-    $('#fc-ranges').innerHTML = RANGES.map(([l, s]) => `<button class="btn${s === range ? ' on' : ''}" data-s="${s}">${l}</button>`).join('');
-    document.querySelectorAll('#fc-ranges button').forEach((b) => (b.onclick = () => { range = +b.dataset.s; rangeButtons(); chartsAt = 0; charts(); }));
-    $('#fc-charts').innerHTML = CHARTS.map(([d, m, t]) => `<div class="chart" data-k="${d}/${m}"><div class="ch"><b>${t}</b><span data-cur></span></div><canvas></canvas></div>`).join('');
+  const store = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) {} };
+  const load = (k, d) => { try { return JSON.parse(localStorage.getItem(k)) ?? d; } catch (e) { return d; } };
+  let period = load('sbFlowPeriod', 'today');
+  if (!PERIODS[period]) period = 'today';
+  const hidden = new Set(load('sbFlowHidden', []));
+  const cache = {};   // k → {ts, v} for the current period
+  let chartsAt = 0;
+
+  function controls() {
+    $('#fc-ranges').innerHTML = Object.entries(PERIODS).filter(([k]) => k !== '30d')
+      .map(([k, [l]]) => `<button class="btn${k === period ? ' on' : ''}" data-p="${k}">${l}</button>`).join('');
+    document.querySelectorAll('#fc-ranges button').forEach((b) => (b.onclick = () => {
+      period = b.dataset.p; store('sbFlowPeriod', period); controls(); chartsAt = 0; charts();
+    }));
+    $('#fc-legend').innerHTML = CHART.map((c) => `<label><input type="checkbox" data-k="${c.k}"${hidden.has(c.k) ? '' : ' checked'}>` +
+      `<i style="background:${c.color}"></i>${c.label}${c.axis === 'right' ? ' (правая шкала)' : ''}</label>`).join('');
+    document.querySelectorAll('#fc-legend input').forEach((i) => (i.onchange = () => {
+      i.checked ? hidden.delete(i.dataset.k) : hidden.add(i.dataset.k);
+      store('sbFlowHidden', [...hidden]);
+      charts(true);
+    }));
   }
-  async function charts() {
-    if (Date.now() - chartsAt < 60000) return;
-    chartsAt = Date.now();
-    const to = Math.floor(Date.now() / 1000), from = to - range;
-    for (const [d, m, , unit, color] of CHARTS) {
-      const el = document.querySelector(`#fc-charts [data-k="${d}/${m}"]`);
-      try {
-        const s = await api(`/api/series?device=${d}&metric=${m}&from=${from}&to=${to}`);
-        Plot(el.querySelector('canvas'), { series: [{ ts: s.ts, v: s.v, color }], unit, from, to });
-        el.querySelector('[data-cur]').textContent = s.v.length ? num(s.v[s.v.length - 1], unit === '%' ? 0 : 0) + ' ' + unit : '';
-      } catch (e) { el.querySelector('[data-cur]').textContent = 'ошибка'; }
+
+  async function charts(redrawOnly) {
+    const [from, to] = PERIODS[period][1]();
+    if (!redrawOnly || CHART.some((c) => !hidden.has(c.k) && !cache[c.k])) {
+      if (redrawOnly !== true && Date.now() - chartsAt < 60000) return;
+      chartsAt = Date.now();
+      // Only fetch what's shown; hidden series aren't loaded at all.
+      await Promise.all(CHART.filter((c) => !hidden.has(c.k)).map(async (c) => {
+        try { cache[c.k] = await api(`/api/series?device=${c.d}&metric=${c.m}&from=${from}&to=${to}&points=500`); }
+        catch (e) { cache[c.k] = { ts: [], v: [] }; }
+      }));
+      for (const c of CHART) if (hidden.has(c.k)) delete cache[c.k];
     }
+    Plot($('#fc-chart'), {
+      from, to,
+      series: CHART.filter((c) => !hidden.has(c.k) && cache[c.k]).map((c) => ({ ...cache[c.k], color: c.color, label: c.label, unit: c.unit, axis: c.axis, fixed: c.fixed })),
+    });
   }
 
   let resized;
   window.addEventListener('resize', () => { clearTimeout(resized); resized = setTimeout(() => { if (!$('#page-flow').hidden) { chartsAt = 0; charts(); } }, 200); });
 
   page('flow', {
-    show() { rangeButtons(); chartsAt = 0; todayAt = 0; },
+    show() { controls(); chartsAt = 0; todayAt = 0; },
     async tick() { render(); await energy(); render(); charts(); },
   });
 })();

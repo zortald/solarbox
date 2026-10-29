@@ -38,16 +38,18 @@
   }
   const HIDDEN = new Set(['chg', 'dsg', 'bal', 'cell_min_i', 'cell_max_i', 'uptime']);
   const DEV = { inverter: 'Инвертор', bms: 'АКБ / BMS' };
-  const RANGES = [['1ч', 3600], ['6ч', 21600], ['24ч', 86400], ['7д', 604800], ['30д', 2592000]];
   // config.json → ui.metrics overrides/extends these labels live.
   const meta = (m) => Object.assign({ label: m, unit: '', color: '#4ea3ff' }, META[m], SB.cfg.ui.metrics?.[m]);
   SB.metricLabel = (m) => meta(m).label;
-  const state = { range: 21600, selected: new Set(['inverter/pv_w', 'inverter/ac_out_w', 'bms/soc', 'bms/bms_w']), catalog: [] };
+  const state = { period: localStorage.getItem('sbHistPeriod') || 'today', selected: new Set(['inverter/pv_w', 'inverter/ac_out_w', 'bms/soc', 'bms/bms_w']), catalog: [] };
   let timer = null;
 
   function ranges() {
-    $('#h-ranges').innerHTML = RANGES.map(([l, s]) => `<button class="btn${s === state.range ? ' on' : ''}" data-s="${s}">${l}</button>`).join('');
-    document.querySelectorAll('#h-ranges button').forEach((b) => (b.onclick = () => { state.range = +b.dataset.s; ranges(); charts(); }));
+    if (!PERIODS[state.period]) state.period = 'today';
+    $('#h-ranges').innerHTML = Object.entries(PERIODS).map(([k, [l]]) => `<button class="btn${k === state.period ? ' on' : ''}" data-p="${k}">${l}</button>`).join('');
+    document.querySelectorAll('#h-ranges button').forEach((b) => (b.onclick = () => {
+      state.period = b.dataset.p; localStorage.setItem('sbHistPeriod', state.period); ranges(); charts();
+    }));
   }
 
   function picker() {
@@ -62,7 +64,7 @@
   async function charts() {
     const host = $('#h-charts'), keys = [...state.selected];
     if (!keys.length) { host.innerHTML = '<div class="empty">Выбери показатели.</div>'; return; }
-    const to = Math.floor(Date.now() / 1000), from = to - state.range;
+    const [from, to] = PERIODS[state.period][1]();
     host.innerHTML = keys.map((k) => { const m = meta(k.split('/')[1]); return `<div class="chart" data-k="${k}"><div class="ch"><b>${m.label}</b><span data-cur></span></div><canvas></canvas></div>`; }).join('');
     for (const k of keys) {
       const [dev, m] = k.split('/'), mt = meta(m), el = host.querySelector(`[data-k="${CSS.escape(k)}"]`);

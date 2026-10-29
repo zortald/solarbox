@@ -157,3 +157,7 @@ details summary { cursor: pointer; color: var(--muted); }
 #set-tg .row { margin-top: 6px; } #set-tg input { min-width: 220px; }
 
 .fcgrid .chart { background: var(--panel2); }
+
+canvas.xtall { height: 280px; }
+.legend.toggles label { display: inline-flex; align-items: center; gap: 4px; cursor: pointer; user-select: none; }
+.legend.toggles input { accent-color: var(--accent); margin: 0; }
