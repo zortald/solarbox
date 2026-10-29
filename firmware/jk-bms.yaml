@@ -59,7 +59,11 @@ jk_bms_ble:
 
 sensor:
   - platform: wifi_signal
+    id: w_rssi
     name: "Сигнал Wi-Fi"
+  - platform: uptime
+    id: up
+    internal: true
     update_interval: 60s
   - platform: jk_bms_ble
     jk_bms_ble_id: bms0
@@ -96,6 +100,66 @@ sensor:
     delta_cell_voltage:
       id: b_cd
       name: "Разброс ячеек Vd"
+    cell_voltage_1:
+      id: b_c1
+      internal: true
+    cell_voltage_2:
+      id: b_c2
+      internal: true
+    cell_voltage_3:
+      id: b_c3
+      internal: true
+    cell_voltage_4:
+      id: b_c4
+      internal: true
+    cell_voltage_5:
+      id: b_c5
+      internal: true
+    cell_voltage_6:
+      id: b_c6
+      internal: true
+    cell_voltage_7:
+      id: b_c7
+      internal: true
+    cell_voltage_8:
+      id: b_c8
+      internal: true
+    cell_resistance_1:
+      id: b_r1
+      internal: true
+    cell_resistance_2:
+      id: b_r2
+      internal: true
+    cell_resistance_3:
+      id: b_r3
+      internal: true
+    cell_resistance_4:
+      id: b_r4
+      internal: true
+    cell_resistance_5:
+      id: b_r5
+      internal: true
+    cell_resistance_6:
+      id: b_r6
+      internal: true
+    cell_resistance_7:
+      id: b_r7
+      internal: true
+    cell_resistance_8:
+      id: b_r8
+      internal: true
+    min_voltage_cell:
+      id: b_cmin_i
+      internal: true
+    max_voltage_cell:
+      id: b_cmax_i
+      internal: true
+    average_cell_voltage:
+      id: b_cavg
+      internal: true
+    balancing_current:
+      id: b_bal_a
+      internal: true
 
 binary_sensor:
   - platform: jk_bms_ble
@@ -111,12 +175,18 @@ binary_sensor:
       name: "Баланс BAL"
 
 text_sensor:
+  - platform: version
+    name: "Версия FW"
   - platform: jk_bms_ble
     jk_bms_ble_id: bms0
     errors:
       name: "Ошибки ERR"
     total_runtime_formatted:
       name: "Наработка RT"
+
+button:
+  - platform: restart
+    name: "Перезагрузка RST"
 
 # Push to solarbox (standalone dashboard on the main router container).
 http_request:
@@ -153,3 +223,14 @@ interval:
                   flag("chg", id(b_chg));
                   flag("dsg", id(b_dsg));
                   flag("bal", id(b_bal));
+                  put("rssi", id(w_rssi).state);
+                  put("uptime", id(up).state);
+                  put("cell_avg", id(b_cavg).state);
+                  put("bal_a", id(b_bal_a).state);
+                  put("cell_min_i", id(b_cmin_i).state);
+                  put("cell_max_i", id(b_cmax_i).state);
+                  static const char *const CK[] = {"c1", "c2", "c3", "c4", "c5", "c6", "c7", "c8"};
+                  static const char *const RK[] = {"r1", "r2", "r3", "r4", "r5", "r6", "r7", "r8"};
+                  sensor::Sensor *const cv[] = {id(b_c1), id(b_c2), id(b_c3), id(b_c4), id(b_c5), id(b_c6), id(b_c7), id(b_c8)};
+                  sensor::Sensor *const cr[] = {id(b_r1), id(b_r2), id(b_r3), id(b_r4), id(b_r5), id(b_r6), id(b_r7), id(b_r8)};
+                  for (int i = 0; i < 8; i++) { put(CK[i], cv[i]->state); put(RK[i], cr[i]->state); }

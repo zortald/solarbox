@@ -1,0 +1,30 @@
+{
+  "boards": [
+    {
+      "name": "inverter", "host": "192.168.88.10", "web_port": 80, "ota_port": 8266,
+      "title": "Инвертор", "chip": "ESP8266",
+      "restart": "button/inverter restart", "version": "text_sensor/inverter version"
+    },
+    {
+      "name": "bms", "host": "192.168.88.11", "web_port": 80, "ota_port": 3232,
+      "title": "АКБ · JK BMS", "chip": "ESP32-C3",
+      "restart": "button/Перезагрузка RST", "version": "text_sensor/Версия FW"
+    }
+  ],
+  "read_domains": ["sensor", "binary_sensor", "text_sensor", "switch", "select", "number"],
+  "actions": [
+    { "domain": "switch", "actions": ["turn_on", "turn_off", "toggle"] },
+    { "domain": "button", "actions": ["press"] },
+    { "domain": "select", "actions": ["set"] },
+    { "domain": "number", "actions": ["set"] },
+    {
+      "board": "inverter", "domain": "text", "entity": "inverter command", "actions": ["set"],
+      "values": ["POP##", "PCP##", "PGR##", "PBT##", "MUCHGC###", "MNCHGC####", "MCHGC###",
+                 "PBCV##.#", "PBDV##.#", "PSDV##.#", "PCVV##.#", "PBFT##.#", "F50", "F60",
+                 "PE[abjkuvxyz]+", "PD[abjkuvxyz]+"]
+    }
+  ],
+  "ui": {
+    "metrics": {}
+  }
+}

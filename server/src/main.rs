@@ -5,11 +5,15 @@
 //! `/api/series` and `/api/catalog`. The whole thing is one static binary with
 //! the UI baked in, meant to sit in a container on the site's router.
 
+mod boards;
+mod config;
 mod db;
+mod files;
+mod ota;
 
 use axum::{
-    extract::{Json, Path, Query, State},
-    http::{header, HeaderMap, StatusCode},
+    extract::{DefaultBodyLimit, Json, Path, Query, State},
+    http::{HeaderMap, StatusCode},
     response::{IntoResponse, Response},
     routing::{get, post},
     Router,
@@ -19,7 +23,8 @@ use rust_embed::RustEmbed;
 use serde::Deserialize;
 use std::{
     collections::HashMap,
-    sync::{Arc, Mutex},
+    path::PathBuf,
+    sync::{atomic::AtomicBool, Arc, Mutex},
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
@@ -32,6 +37,13 @@ struct AppState {
     tiers: Arc<Vec<db::Tier>>,
     /// Lookback (secs) for the open-ended oldest tier.
     tail: i64,
+    /// Hot-reloaded config.json: boards, control rules, UI metadata.
+    config: Arc<config::Store>,
+    /// Live UI overrides (served before the embedded files).
+    static_dir: PathBuf,
+    /// Password for anything that changes state (None = control disabled).
+    admin: Option<String>,
+    ota_busy: Arc<AtomicBool>,
 }
 
 #[derive(RustEmbed)]
@@ -67,7 +79,17 @@ async fn main() {
         token: token.clone(),
         tiers: tiers.clone(),
         tail,
+        config: Arc::new(config::Store::open(
+            PathBuf::from(env("SOLARBOX_CONFIG", "/data/config.json")),
+            config::Config::default_with(&env("SOLARBOX_BOARDS", "")),
+        )),
+        static_dir: PathBuf::from(env("SOLARBOX_STATIC_DIR", "/data/static")),
+        admin: std::env::var("SOLARBOX_ADMIN_PASSWORD").ok().filter(|s| !s.is_empty()),
+        ota_busy: Arc::new(AtomicBool::new(false)),
     };
+    let control = format!("{} board(s), ui overrides in {}, control {}", state.config.get().boards.len(),
+        state.static_dir.display(),
+        if state.admin.is_some() { "enabled" } else { "disabled" });
 
     // Background maintenance: tiered downsampling, then optional hard retention.
     {
@@ -103,8 +125,20 @@ async fn main() {
         .route("/api/series", get(series))
         .route("/api/catalog", get(catalog))
         .route("/api/compact", post(compact_now))
+        .route("/api/boards", get(boards::list))
+        .route("/api/board/:name/ping", get(boards::ping))
+        .route("/api/board/:name/entity", get(boards::entity))
+        .route("/api/board/:name/action", post(boards::action))
+        .route(
+            "/api/board/:name/ota",
+            post(boards::flash).layer(DefaultBodyLimit::max(8 * 1024 * 1024)),
+        )
+        .route("/api/admin/check", post(boards::admin_check))
+        .route("/api/config", get(files::get_config).put(files::put_config))
+        .route("/api/files", get(files::list))
+        .route("/api/files/:name", axum::routing::put(files::put).delete(files::delete))
         .route("/healthz", get(|| async { "ok" }))
-        .route("/", get(|| async { serve("index.html") }))
+        .route("/", get(|State(st): State<AppState>| async move { files::serve(&st, "index.html") }))
         .route("/*path", get(asset))
         .with_state(state);
 
@@ -112,7 +146,7 @@ async fn main() {
         .await
         .expect("bind address");
     eprintln!(
-        "solarbox on {addr}  db={db_path}  retention={retention_days}d  auth={}",
+        "solarbox on {addr}  db={db_path}  retention={retention_days}d  auth={}  {control}",
         if token.is_some() { "token" } else { "open" }
     );
     axum::serve(listener, app)
@@ -327,20 +361,10 @@ async fn series(State(st): State<AppState>, Query(q): Query<SeriesQ>) -> Respons
     }
 }
 
-// ---- static dashboard (embedded) ------------------------------------------
+// ---- static dashboard (volume overrides, then embedded) -------------------
 
-async fn asset(Path(path): Path<String>) -> Response {
-    serve(&path)
-}
-
-fn serve(path: &str) -> Response {
-    match Assets::get(path) {
-        Some(f) => {
-            let mime = mime_guess::from_path(path).first_or_octet_stream();
-            ([(header::CONTENT_TYPE, mime.as_ref().to_string())], f.data.into_owned()).into_response()
-        }
-        None => (StatusCode::NOT_FOUND, "not found").into_response(),
-    }
+async fn asset(State(st): State<AppState>, Path(path): Path<String>) -> Response {
+    files::serve(&st, &path)
 }
 
 async fn shutdown() {

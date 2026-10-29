@@ -187,3 +187,10 @@ pub fn compact(conn: &mut Connection, tiers: &[Tier], now: i64, tail: i64) -> ru
     }
     Ok(total)
 }
+
+/// Newest push timestamp per device.
+pub fn last_push(conn: &Connection) -> rusqlite::Result<Vec<(String, i64)>> {
+    let mut st = conn.prepare_cached("SELECT device, MAX(ts) FROM latest GROUP BY device")?;
+    let rows = st.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?;
+    rows.collect()
+}

@@ -1,0 +1,110 @@
+// Boards: status of each board, restart, and firmware upload (native ESPHome
+// OTA through the server). Control needs the admin login.
+
+(() => {
+  const { $, esc, BOARDS, v, age, ago, dur, num, api, entity, act, toast, requireAdmin, page } = SB;
+  let list = [], extra = {}, built = false, flashing = false;
+
+  function card(b) {
+    const ui = BOARDS[b.name] || { title: b.name, chip: '' };
+    return `<div class="board" id="bd-${b.name}">
+      <div class="bh"><b>${esc(ui.title)}</b><span class="muted">${esc(ui.chip)} · ${esc(b.host)}</span><span class="bst" data-st></span></div>
+      <div class="facts" data-facts></div>
+      <div class="bact">
+        <button class="btn" data-ping>Проверить связь</button>
+        <button class="btn adm" data-restart ${ui.restart ? '' : 'disabled'}>Перезагрузить</button>
+        <a class="btn" href="http://${esc(b.host)}${b.web_port !== 80 ? ':' + b.web_port : ''}/" target="_blank" rel="noopener">Веб платы ↗</a>
+      </div>
+      <div class="ota adm-only">
+        <label>Прошивка (.bin из <code>esphome compile</code>, файл <code>firmware.bin</code> / <code>*.ota.bin</code>):</label>
+        <input type="file" accept=".bin" data-file>
+        <button class="btn" data-flash>Прошить</button>
+        <div class="muted" data-otamsg></div>
+      </div>
+    </div>`;
+  }
+
+  function render() {
+    for (const b of list) {
+      const el = document.getElementById('bd-' + b.name); if (!el) continue;
+      const a = age(b.name), up = v(b.name, 'uptime'), rssi = v(b.name, 'rssi'), x = extra[b.name] || {};
+      const ok = a < 90;
+      el.querySelector('[data-st]').innerHTML = `<span class="dot ${ok ? 'ok' : 'bad'}"></span>${ok ? 'данные идут' : 'молчит'}`;
+      const rows = [
+        ['Последний пакет', ago(a)],
+        ['Работает', up !== undefined ? dur(up) : '—'],
+        ['Wi-Fi', rssi !== undefined ? num(rssi, 0) + ' дБм' : '—'],
+        ['Прошивка', x.version ?? '—'],
+        ['Связь с сервером', x.ping ?? '—'],
+      ];
+      el.querySelector('[data-facts]').innerHTML = rows.map(([k, t]) => `<div><span>${k}</span><b>${esc(t)}</b></div>`).join('');
+    }
+  }
+
+  async function probe(name) {
+    const x = (extra[name] = extra[name] || {});
+    try {
+      const p = await api(`/api/board/${name}/ping`);
+      x.ping = p.ok ? `есть · ${p.ms} мс` : 'нет: ' + (p.error || 'HTTP ' + p.status);
+    } catch (e) { x.ping = 'нет: ' + e.message; }
+    const ui = BOARDS[name];
+    if (ui?.version) { try { x.version = (await entity(name, ui.version)).value; } catch (e) { x.version = '—'; } }
+    render();
+  }
+
+  async function restart(name) {
+    if (!requireAdmin()) return;
+    const ui = BOARDS[name];
+    if (!confirm(`Перезагрузить плату «${ui.title}»? Данные с неё пропадут примерно на полминуты.`)) return;
+    try { await act(name, ui.restart, 'press'); toast('Плата перезагружается'); }
+    catch (e) { toast('Не получилось: ' + e.message, true); }
+  }
+
+  async function flash(name, el) {
+    if (!requireAdmin()) return;
+    if (flashing) return toast('Уже идёт прошивка другой платы', true);
+    const f = el.querySelector('[data-file]').files[0];
+    if (!f) return toast('Выбери файл прошивки', true);
+    const ui = BOARDS[name];
+    if (!confirm(`Прошить «${ui.title}» файлом ${f.name} (${Math.round(f.size / 1024)} КБ)?\n\nЕсли файл от другой платы, она может не загрузиться — проверь имя.`)) return;
+    const msg = el.querySelector('[data-otamsg]');
+    flashing = true;
+    el.querySelectorAll('button').forEach((b) => (b.disabled = true));
+    msg.textContent = 'Загружаю прошивку на плату… это занимает до минуты, не закрывай страницу.';
+    const before = SB.T[name] || 0;
+    try {
+      const r = await api(`/api/board/${name}/ota`, { method: 'POST', body: await f.arrayBuffer(), headers: { 'Content-Type': 'application/octet-stream' } });
+      msg.textContent = '✔ ' + r.message + '. Жду, когда плата вернётся…';
+      toast('Прошивка залита');
+      // Success = the board pushes again after the reboot.
+      for (let i = 0; i < 40; i++) {
+        await new Promise((res) => setTimeout(res, 3000));
+        if ((SB.T[name] || 0) > before + 5) { msg.textContent = '✔ ' + r.message + '. Плата вернулась и шлёт данные.'; probe(name); break; }
+        if (i === 39) msg.textContent = '✔ Прошивка залита, но плата пока не прислала данных — проверь через минуту.';
+      }
+    } catch (e) {
+      msg.textContent = '✘ ' + e.message;
+      toast('Прошивка не удалась: ' + e.message, true);
+    } finally {
+      flashing = false;
+      el.querySelectorAll('button').forEach((b) => (b.disabled = false));
+    }
+  }
+
+  async function load() {
+    try { list = (await api('/api/boards')).boards; } catch (e) { list = []; }
+    $('#boards').innerHTML = list.length ? list.map(card).join('')
+      : '<div class="empty">Платы не настроены на сервере (SOLARBOX_BOARDS).</div>';
+    for (const b of list) {
+      const el = document.getElementById('bd-' + b.name);
+      el.querySelector('[data-ping]').onclick = () => probe(b.name);
+      el.querySelector('[data-restart]').onclick = () => restart(b.name);
+      el.querySelector('[data-flash]').onclick = () => flash(b.name, el);
+      probe(b.name);
+    }
+    built = true;
+    render();
+  }
+
+  page('boards', { show() { if (!built) load(); else list.forEach((b) => probe(b.name)); }, tick: render });
+})();

@@ -162,6 +162,8 @@ text:
           id(inverter0)->queue_command(cmd);
 
 button:
+  - platform: restart
+    name: "${name} restart"
   - platform: template
     name: "${name} wifi scan start"
     icon: mdi:wifi-refresh
@@ -332,6 +334,8 @@ interval:
                   put("batt_chg_a", id(s_bc).state);
                   put("batt_dis_a", id(s_bd).state);
                   put("temp", id(s_temp).state);
+                  put("rssi", id(w_rssi).state);
+                  put("uptime", id(up).state);
 
 http_request:
   verify_ssl: false
@@ -357,7 +361,11 @@ sensor:
     fragmentation:
       name: "${name} heap fragmentation"
   - platform: wifi_signal
+    id: w_rssi
     name: "${name} wifi_signal"
+  - platform: uptime
+    id: up
+    internal: true
     update_interval: 60s
 
   - platform: pipsolar
@@ -411,6 +419,8 @@ sensor:
       name: "${name} pv_charging_power"
 
 text_sensor:
+  - platform: version
+    name: "${name} version"
   - platform: debug
     reset_reason:
       name: "${name} reset reason"

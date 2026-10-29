@@ -16,7 +16,7 @@ RUN mkdir -p /data
 COPY --from=build /src/target/release/solarbox /usr/local/bin/solarbox
 ENV SOLARBOX_DB=/data/solarbox.db \
     SOLARBOX_ADDR=0.0.0.0:8080 \
-    SOLARBOX_RETENTION_DAYS=90
+    SOLARBOX_RETENTION_DAYS=0
 EXPOSE 8080
 VOLUME ["/data"]
 ENTRYPOINT ["/usr/local/bin/solarbox"]

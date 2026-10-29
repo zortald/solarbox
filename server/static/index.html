@@ -3,25 +3,75 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#0f1419">
   <title>solarbox</title>
   <link rel="stylesheet" href="/style.css">
 </head>
 <body>
   <header>
-    <h1>solarbox</h1>
-    <div id="status" class="status">…</div>
+    <div class="top">
+      <h1>solarbox</h1>
+      <div id="status" class="status">…</div>
+      <button id="admin" class="btn">🔒 Войти</button>
+    </div>
+    <nav>
+      <a href="#flow">Потоки</a>
+      <a href="#cells">АКБ</a>
+      <a href="#inverter">Инвертор</a>
+      <a href="#boards">Платы</a>
+      <a href="#history">История</a>
+    </nav>
   </header>
 
-  <section id="now" class="now"></section>
+  <main>
+    <section data-page="flow" id="page-flow">
+      <div class="panel flow"><svg id="flow-svg" viewBox="0 0 360 290"></svg></div>
+      <div class="panel facts" id="flow-facts"></div>
+      <p class="muted small">Мощность сети инвертор не сообщает — она оценена по балансу (≈).</p>
+    </section>
 
-  <section class="charts-head">
-    <div class="ranges" id="ranges"></div>
-    <div class="metrics" id="metrics"></div>
-  </section>
+    <section data-page="cells" id="page-cells" hidden>
+      <div class="panel"><h2>Ячейки</h2><div id="cells"></div></div>
+      <div class="panel facts" id="cell-facts"></div>
+      <div class="panel"><h2>Состояние BMS</h2>
+        <div class="facts"><div><span>Ошибки</span><b id="bms-errors">—</b></div><div><span>Наработка</span><b id="bms-runtime">—</b></div></div>
+      </div>
+      <div class="panel"><h2>Ячейки за сутки</h2><div class="legend" id="cells-legend"></div><canvas id="cells-chart" class="tall"></canvas></div>
+    </section>
 
-  <section id="charts" class="charts"></section>
+    <section data-page="inverter" id="page-inverter" hidden>
+      <div class="panel"><h2>Режим</h2>
+        <div class="facts"><div><span>Сейчас</span><b id="inv-mode">—</b></div></div>
+        <h3>Приоритет выхода</h3><div class="row" id="inv-prio"></div>
+      </div>
+      <div class="panel"><h2>Настройки</h2>
+        <p class="muted small">Значения читаются из инвертора (QPIRI/QFLAG). После «Применить» панель ждёт, пока инвертор сам покажет новое значение. Недопустимое инвертор отклонит.</p>
+        <div id="inv-settings"></div>
+      </div>
+      <div class="panel"><h2>Функции</h2><div id="inv-flags"></div></div>
+      <div class="panel muted small" id="inv-raw"></div>
+    </section>
+
+    <section data-page="boards" id="page-boards" hidden>
+      <p class="muted small adm-hint">Перезагрузка и прошивка — после входа (🔒 вверху).</p>
+      <div id="boards"></div>
+    </section>
+
+    <section data-page="history" id="page-history" hidden>
+      <div class="panel"><div class="row" id="h-ranges"></div><div id="h-metrics"></div></div>
+      <div id="h-charts"></div>
+    </section>
+  </main>
+
+  <div id="toast"></div>
 
   <script src="/plot.js"></script>
-  <script src="/app.js"></script>
+  <script src="/core.js"></script>
+  <script src="/flow.js"></script>
+  <script src="/cells.js"></script>
+  <script src="/inverter.js"></script>
+  <script src="/boards.js"></script>
+  <script src="/history.js"></script>
+  <script>SB.start();</script>
 </body>
 </html>
