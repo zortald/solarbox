@@ -49,6 +49,8 @@ struct AppState {
     sys: Arc<sysinfo::Sampler>,
     db_path: String,
     retention_days: i64,
+    /// Every ingested packet is re-broadcast to open dashboards (SSE).
+    bus: tokio::sync::broadcast::Sender<String>,
 }
 
 #[derive(RustEmbed)]
@@ -73,7 +75,7 @@ async fn main() {
         .ok()
         .and_then(|s| parse_tiers(&s))
         .unwrap_or_else(default_tiers);
-    let compact_every = parse_dur(&env("SOLARBOX_COMPACT_EVERY", "6h")).unwrap_or(21_600).max(60);
+    let compact_every = parse_dur(&env("SOLARBOX_COMPACT_EVERY", "1h")).unwrap_or(3_600).max(60);
     let tail = parse_dur(&env("SOLARBOX_COMPACT_TAIL", "2d")).unwrap_or(172_800);
 
     let conn = db::open(&db_path).expect("open database");
@@ -94,6 +96,7 @@ async fn main() {
         sys: Arc::new(sysinfo::Sampler::new()),
         db_path: db_path.clone(),
         retention_days,
+        bus: tokio::sync::broadcast::channel(64).0,
     };
     {
         let sys = state.sys.clone();
@@ -140,6 +143,7 @@ async fn main() {
         .route("/api/ingest", post(ingest))
         .route("/api/latest", get(latest))
         .route("/api/series", get(series))
+        .route("/api/stream", get(stream))
         .route("/api/catalog", get(catalog))
         .route("/api/compact", post(compact_now))
         .route("/api/boards", get(boards::list))
@@ -216,7 +220,13 @@ async fn ingest(State(st): State<AppState>, headers: HeaderMap, Json(body): Json
         for it in &items {
             let ts = it.ts.unwrap_or_else(now);
             match db::insert(&mut c, &it.device, ts, &it.metrics) {
-                Ok(n) => stored += n,
+                Ok(n) => {
+                    stored += n;
+                    // Nobody listening is fine (send only fails without receivers).
+                    let _ = st.bus.send(
+                        serde_json::json!({ "device": it.device, "ts": ts, "metrics": it.metrics }).to_string(),
+                    );
+                }
                 Err(e) => {
                     eprintln!("[ingest] {e}");
                     return (StatusCode::INTERNAL_SERVER_ERROR, "db error").into_response();
@@ -304,6 +314,19 @@ fn parse_tiers(s: &str) -> Option<Vec<db::Tier>> {
     }
     v.sort_by_key(|t| t.min_age);
     Some(v)
+}
+
+// ---- live stream ----------------------------------------------------------
+
+/// Server-sent events: one `data:` line per ingested packet, as it arrives.
+async fn stream(
+    State(st): State<AppState>,
+) -> axum::response::sse::Sse<impl tokio_stream::Stream<Item = Result<axum::response::sse::Event, std::convert::Infallible>>> {
+    use axum::response::sse::{Event, KeepAlive, Sse};
+    use tokio_stream::{wrappers::BroadcastStream, StreamExt};
+    let s = BroadcastStream::new(st.bus.subscribe())
+        .filter_map(|m| m.ok().map(|j| Ok(Event::default().data(j))));
+    Sse::new(s).keep_alive(KeepAlive::new().interval(Duration::from_secs(15)))
 }
 
 // ---- reads ----------------------------------------------------------------

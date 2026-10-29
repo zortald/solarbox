@@ -309,7 +309,7 @@ interval:
 
 
   # Push to solarbox (standalone dashboard on the main router container).
-  - interval: 20s
+  - interval: 5s
     then:
       - if:
           condition:

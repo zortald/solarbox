@@ -100,15 +100,36 @@ const SB = (() => {
         for (const [k, o] of Object.entries(d[dev])) { L[dev][k] = o.v; if (o.ts > t) t = o.ts; }
         T[dev] = t;
       }
-      const parts = Object.keys(BOARDS).filter((dev) => BOARDS[dev].status !== false).map((dev) => {
-        const ok = fresh(dev);
-        return `<span class="dot ${ok ? 'ok' : 'bad'}"></span>${esc(BOARDS[dev].title)}${ok ? '' : ' · ' + ago(age(dev))}`;
-      });
-      $('#status').innerHTML = parts.join(' &nbsp; ');
+      renderStatus();
     } catch (e) {
       $('#status').innerHTML = '<span class="dot bad"></span>сервер недоступен';
     }
     pages[current]?.tick?.();
+  }
+
+  function renderStatus() {
+    const parts = Object.keys(BOARDS).filter((dev) => BOARDS[dev].status !== false).map((dev) => {
+      const ok = fresh(dev);
+      return `<span class="dot ${ok ? 'ok' : 'bad'}"></span>${esc(BOARDS[dev].title)}${ok ? '' : ' · ' + ago(age(dev))}`;
+    });
+    $('#status').innerHTML = parts.join(' &nbsp; ') + (live ? ' <span class="live">● live</span>' : '');
+  }
+
+  // Live push: the server re-sends every packet a board posts; merge it in and
+  // redraw (coalesced). /api/latest polling stays as a slow safety net.
+  let live = false, redraw = null;
+  function stream() {
+    const es = new EventSource('/api/stream');
+    es.onopen = () => { live = true; renderStatus(); };
+    es.onmessage = (ev) => {
+      let p; try { p = JSON.parse(ev.data); } catch (e) { return; }
+      const d = (L[p.device] ||= {});
+      Object.assign(d, p.metrics);
+      if (!T[p.device] || p.ts > T[p.device]) T[p.device] = p.ts;
+      clearTimeout(redraw);
+      redraw = setTimeout(() => { renderStatus(); pages[current]?.tick?.(); }, 150);
+    };
+    es.onerror = () => { live = false; renderStatus(); }; // EventSource reconnects by itself
   }
 
   // ---- navigation ----
@@ -138,7 +159,9 @@ const SB = (() => {
     await loadConfig();
     checkAdmin();
     refreshLatest().then(go);
-    setInterval(refreshLatest, 5000);
+    stream();
+    setInterval(refreshLatest, 30000);
+    setInterval(renderStatus, 5000);   // keeps "молчит N с" ages moving
   }
 
   return { $, esc, BOARDS, L, T, v, fresh, age, ago, dur, num, api, entity, act, toast, requireAdmin, page, start,

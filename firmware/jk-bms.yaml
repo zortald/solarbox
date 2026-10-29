@@ -55,7 +55,7 @@ jk_bms_ble:
   - ble_client_id: bms_client
     id: bms0
     protocol_version: JK02_32S
-    throttle: 5s
+    throttle: 2s
 
 sensor:
   - platform: wifi_signal
@@ -194,7 +194,7 @@ http_request:
   timeout: 3s
 
 interval:
-  - interval: 20s
+  - interval: 5s
     then:
       - if:
           condition:

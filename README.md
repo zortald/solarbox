@@ -39,7 +39,7 @@ boards ──POST JSON──▶ /api/ingest ──▶ SQLite ──▶ dashboard
 | `SOLARBOX_ADDR` | `0.0.0.0:8080` | listen address |
 | `SOLARBOX_TOKEN` | *(unset)* | if set, ingest requires `X-Token` |
 | `SOLARBOX_TIERS` | *(see below)* | age→resolution downsampling tiers |
-| `SOLARBOX_COMPACT_EVERY` | `6h` | how often the compaction pass runs |
+| `SOLARBOX_COMPACT_EVERY` | `1h` | how often the compaction pass runs |
 | `SOLARBOX_COMPACT_TAIL` | `2d` | lookback for the open-ended oldest tier |
 | `SOLARBOX_RETENTION_DAYS` | `0` | optional hard delete beyond compaction (`0` = keep) |
 
