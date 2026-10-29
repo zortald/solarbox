@@ -28,7 +28,7 @@ Booleans (charge/discharge/balance flags) go as `1` / `0`.
 
 ## ESPHome snippet to add to a board
 
-Set the server address to wherever solarbox runs (e.g. `.230` on the boards' LAN). This sends every 10 s and does not block the existing web panel.
+Set the server address to wherever solarbox runs. This sends every 10 s and does not block the existing web panel.
 
 ```yaml
 http_request:
@@ -40,7 +40,7 @@ interval:
   - interval: 10s
     then:
       - http_request.post:
-          url: "http://192.168.88.230:8080/api/ingest"
+          url: "http://<solarbox-host>:8080/api/ingest"
           headers:
             Content-Type: application/json
             # X-Token: !secret solarbox_token   # only if the server requires it
@@ -64,3 +64,9 @@ like `ac_out_w`, `pv_w`, `grid_v`, `batt_v`, `load_pct`.
 > Flashing is a separate, careful step over the tunnel (OTA) — do not change
 > the live boards casually; they are remote. Validate the POST against a local
 > `solarbox` run first.
+
+## Secrets
+
+Both configs read Wi-Fi from ESPHome's `secrets.yaml` (not in the repo):
+`site_wifi_ssid` / `site_wifi_password` — the site network,
+`wifi_ssid` / `wifi_password` — a second known network.

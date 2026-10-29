@@ -3,9 +3,10 @@
 #   SB_ADMIN=<password> ./deploy/push-ui.sh                 # all of server/static
 #   SB_ADMIN=<password> ./deploy/push-ui.sh app.css flow.js # only these
 #   SB_ADMIN=<password> ./deploy/push-ui.sh --reset flow.js # back to the embedded copy
-# SB_URL defaults to the site router through the tunnel.
+# SB_URL comes from deploy/local.env (or the environment).
 set -e
-URL=${SB_URL:-http://127.0.0.1:48080}
+[ -f "$(dirname "$0")/local.env" ] && . "$(dirname "$0")/local.env"
+URL=${SB_URL:?set SB_URL (deploy/local.env)}
 : "${SB_ADMIN:?set SB_ADMIN to the solarbox admin password}"
 cd "$(dirname "$0")/../server/static"
 reset=0

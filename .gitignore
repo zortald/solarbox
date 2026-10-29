@@ -14,3 +14,6 @@
 # os / editor
 .DS_Store
 .db-backup/
+
+# per-site deploy settings
+/deploy/local.env

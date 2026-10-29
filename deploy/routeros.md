@@ -1,79 +1,86 @@
-# Running solarbox in a RouterOS container (hAP ax S, arm64)
+# Running solarbox in a RouterOS container
 
-> Containers on RouterOS need **device-mode `container=yes`**, which requires a
-> physical power-cycle (hold reset / cold boot) to confirm. Plan that in — it
-> cannot be enabled purely over the network.
+## Pick the image
 
-## Where to run it
+| Router CPU (`/system/resource/print` → architecture) | Build |
+|---|---|
+| `arm` (e.g. hAP ax S, EN7562CT) | `./deploy/build-armv5.sh` → `solarbox-armv5.tar` |
+| `arm` with ARMv7 cores | `./deploy/build-armv7.sh` |
+| `arm64` | `./deploy/build-arm64.sh` |
 
-Two options, depending on where the ESP boards can reach:
+The build scripts write the legacy `docker save` format: RouterOS rejects
+Docker Desktop's OCI export with "could not load next layer".
 
-- **On `.230`** — `.230` is a Wi-Fi *client* on the boards' LAN
-  (`192.168.88.0/24`), i.e. on the same subnet as the boards. The boards can
-  POST straight to `.230`'s LAN address with no routing. **Recommended** so the
-  push path is trivial.
-- **On the main router `192.168.88.1`** — only if the boards have a working route
-  to it (they currently sit behind the boards' router's NAT, so this needs a reverse route
-  first).
+## 1. Container package
 
-Reach the dashboard from your Mac through the existing tunnel by
-adding a port-forward to `<router>:8080`.
-
-## One-time: enable containers
+Let the router fetch the package itself (uploading the npk by hand is unreliable):
 
 ```
-/system/device-mode/update container=yes
-# → confirm with a power-cycle within the time window RouterOS prints
+/system/package/update/check-for-updates
+/system/package/enable container
+/system/package/apply-changes          ;# downloads + reboots
 ```
 
-Add a veth + bridge + address for the container, and a NAT/forward so the
-container port is reachable:
+Do this **before** device-mode: any reboot cancels a pending device-mode update.
+
+## 2. device-mode container=yes (needs physical access)
 
 ```
-/interface/veth/add name=veth-sb address=172.17.0.2/24 gateway=172.17.0.1
-/interface/bridge/add name=dockers
-/ip/address/add address=172.17.0.1/24 interface=dockers
-/interface/bridge/port add bridge=dockers interface=veth-sb
-# publish 8080 to the LAN
-/ip/firewall/nat/add chain=dstnat dst-port=8080 protocol=tcp action=dst-nat to-address=172.17.0.2 to-port=8080
+/system/device-mode/update container=yes activation-timeout=30m
 ```
 
-Mount for the SQLite file (survives container restarts/upgrades):
+- The pending update exists only while the session that ran it stays open.
+  REST times out at 60 s and a one-shot `ssh host "cmd"` closes, so run it in an
+  interactive ssh (inside tmux) and keep it open until the router reboots.
+- Confirm by cutting **all** power for ~10 s (DC jack and PoE if fed), or a
+  brief tap of Reset while running (a long hold at boot resets the config).
+- **attempt-count** (max 3): every update with parameters counts, including
+  refused ones. At 3 a power cut alone does not reset it — send the update
+  again, and cut power while the "too many unsuccessful attempts" window is
+  open → 0. Then arm again and cut power a second time.
+
+## 3. Networking
 
 ```
-/container/mounts/add name=sb-data src=/sb-data dst=/data
+/interface/veth/add name=veth-sb address=172.18.0.2/24 gateway=172.18.0.1
+/interface/bridge/add name=cont-br
+/ip/address/add address=172.18.0.1/24 interface=cont-br
+/interface/bridge/port/add bridge=cont-br interface=veth-sb
+/ip/firewall/nat/add chain=dstnat action=dst-nat protocol=tcp dst-address=<router-lan-ip> \
+    dst-port=8080 to-addresses=172.18.0.2 to-ports=8080 comment="solarbox"
 ```
 
-## Import the image
+The boards must be able to reach `<router-lan-ip>:8080` to push.
 
-Build + export on the Mac first:
+## 4. Container
 
-```
-./deploy/build-arm64.sh        # produces solarbox-arm64.tar
-```
-
-Upload `solarbox-arm64.tar` to the router (Files), then:
+RouterOS 7.25 syntax (`list=` / `mountlists=`):
 
 ```
-/container/add file=solarbox-arm64.tar interface=veth-sb root-dir=sb-root \
-    mounts=sb-data envlist=sb-env logging=yes
-/container/envs/add name=sb-env key=SOLARBOX_RETENTION_DAYS value=90
-# optional shared secret for ingest:
-# /container/envs/add name=sb-env key=SOLARBOX_TOKEN value=<secret>
-/container/start [find]
+/container/mounts/add list=sb-data src=/sb-data dst=/data
+/container/add file=solarbox-armv5.tar interface=veth-sb root-dir=sb-root \
+    mountlists=sb-data logging=yes start-on-boot=yes name=solarbox
+/container/start solarbox
 ```
 
-Check it:
+Optional env (`/container/envs/add list=sb-env key=… value=…`, then
+`envlists=sb-env`): `SOLARBOX_ADMIN_PASSWORD` enables control and admin pages,
+`SOLARBOX_TOKEN` makes ingest require `X-Token`.
 
-```
-/container/print
-/log/print where topics~"container"
-```
+Dashboard `http://<router-lan-ip>:8080/` · health `/healthz`.
 
-Dashboard: `http://<router-lan-ip>:8080/`  ·  health: `/healthz`
+## Updating
+
+`./deploy/push-server.sh` builds, uploads, stops, repulls and starts the
+container, then removes the tar from flash. Settings for your router go in
+`deploy/local.env` (not committed, see `deploy/local.env.example`). The
+database, `config.json`, secrets and UI overrides live in the `sb-data` mount
+and survive.
+
+UI-only changes: `./deploy/push-ui.sh [files]` — live, no rebuild.
 
 ## Notes
 
-- `SOLARBOX_DB` defaults to `/data/solarbox.db` (the mounted volume).
-- If flash is tight, lower `SOLARBOX_RETENTION_DAYS`.
-- The image is ~10–15 MB; the binary itself is a few MB.
+- Don't format USB storage that holds the owner's files; internal flash is
+  enough (the DB is capped at 40 MB by default).
+- The binary is ~3 MB and uses ~4 MB RAM.
