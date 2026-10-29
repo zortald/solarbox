@@ -34,7 +34,8 @@
     $('#flow-svg').innerHTML =
       LINKS.map(([id, d]) => `<path d="${d}" class="fline" style="stroke:${C[id]}"/><path d="${d}" class="fdash" id="fd-${id}" style="stroke:${C[id]}"/>`).join('') +
       // PV header + box
-      ICON.pv(150, 8) + T('ft-pv', 200, 18, 'flab', 'start', 'СОЛНЦЕ СЕГОДНЯ') + T('fe-pv', 200, 40, 'fe', 'start') +
+      // header group (icon ~40 px + label ~95 px) centred over the PV box at x = 250
+      ICON.pv(180, 10) + T('ft-pv', 228, 20, 'flab', 'start', 'СОЛНЦЕ СЕГОДНЯ') + T('fe-pv', 228, 42, 'fe', 'start') +
       box('pv', 208, 64, C.pv) + T('fs-pv', 300, 84, 'fs', 'start') +
       // grid
       ICON.grid(32, 178) + `<line id="grid-x" x1="26" y1="176" x2="76" y2="234" class="fcross"/>` +
