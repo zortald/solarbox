@@ -39,6 +39,11 @@ impl Default for Money {
 impl Money {
     /// Price for a local day and hour, None before the first tariff.
     pub fn price(&self, day: &str, hour: u8) -> Option<f64> {
+        self.zone(day, hour).map(|z| z.0)
+    }
+
+    /// (price, is the night zone) — night only for two-zone tariffs.
+    pub fn zone(&self, day: &str, hour: u8) -> Option<(f64, bool)> {
         let t = self.tariffs.iter().filter(|t| t.from.as_str() <= day).max_by(|a, b| a.from.cmp(&b.from))?;
         let night = if t.night_from > t.night_to {
             hour >= t.night_from || hour < t.night_to
@@ -46,8 +51,8 @@ impl Money {
             hour >= t.night_from && hour < t.night_to
         };
         Some(match (t.night_price, night) {
-            (Some(n), true) => n,
-            _ => t.price,
+            (Some(n), true) => (n, true),
+            _ => (t.price, false),
         })
     }
 }
@@ -71,5 +76,7 @@ mod tests {
         assert_eq!(m.price("2026-11-01", 23), Some(2.5));
         assert_eq!(m.price("2026-11-01", 6), Some(2.5));
         assert_eq!(m.price("2026-11-01", 7), Some(5.0));
+        assert_eq!(m.zone("2026-11-01", 1), Some((2.5, true)));
+        assert_eq!(m.zone("2026-10-31", 1), Some((4.32, false)), "single-zone tariff has no night");
     }
 }

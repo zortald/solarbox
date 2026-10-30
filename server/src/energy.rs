@@ -328,17 +328,33 @@ pub async fn api(State(st): State<AppState>, Query(q): Query<Q>) -> Response {
             let e = hours.entry((day, hour)).or_default();
             if key == "grid" { e.0 += wh } else { e.1 += wh }
         }
-        let mut per_day: HashMap<String, (f64, f64)> = HashMap::new(); // (cost, saved)
+        #[derive(Default)]
+        struct Day { cost: f64, saved: f64, cost_night: f64, grid_night: f64, grid_day: f64, two_zone: bool }
+        let mut per_day: HashMap<String, Day> = HashMap::new();
         for ((day, hour), (grid, load)) in hours {
-            let Some(p) = money.price(&day, hour) else { continue };
+            let Some((p, night)) = money.zone(&day, hour) else { continue };
+            let two_zone = money.zone(&day, 0).is_some_and(|z| z.1) || money.zone(&day, 23).is_some_and(|z| z.1);
             let e = per_day.entry(day).or_default();
-            e.0 += grid / 1000.0 * p;
-            e.1 += (load - grid).max(0.0) / 1000.0 * p;
+            e.two_zone |= two_zone;
+            e.cost += grid / 1000.0 * p;
+            e.saved += (load - grid).max(0.0) / 1000.0 * p;
+            if night {
+                e.cost_night += grid / 1000.0 * p;
+                e.grid_night += grid / 1000.0;
+            } else {
+                e.grid_day += grid / 1000.0;
+            }
         }
+        let r2 = |x: f64| serde_json::json!((x * 100.0).round() / 100.0);
         for (day, m) in by.iter_mut() {
-            if let Some((cost, saved)) = per_day.get(day) {
-                m.insert("cost".into(), serde_json::json!((cost * 100.0).round() / 100.0));
-                m.insert("saved".into(), serde_json::json!((saved * 100.0).round() / 100.0));
+            if let Some(d) = per_day.get(day) {
+                m.insert("cost".into(), r2(d.cost));
+                m.insert("saved".into(), r2(d.saved));
+                if d.two_zone {
+                    m.insert("cost_night".into(), r2(d.cost_night));
+                    m.insert("grid_night".into(), r2(d.grid_night));
+                    m.insert("grid_day".into(), r2(d.grid_day));
+                }
             }
         }
     }

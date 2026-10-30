@@ -70,6 +70,8 @@
       const m = d.day.slice(0, 7);
       const o = (by[m] ||= { day: m, label: MONTHS[+m.slice(5) - 1] + ' ' + m.slice(2, 4) });
       for (const k of [...SER.map((s) => s.k), 'cost', 'saved']) o[k] = (o[k] || 0) + (d[k] || 0);
+      // night split only exists for two-zone days; keep it undefined otherwise
+      for (const k of ['cost_night', 'grid_night', 'grid_day']) if (k in d) o[k] = (o[k] || 0) + d[k];
     }
     return Object.values(by);
   }
@@ -124,7 +126,11 @@
       ['Дом', `${fmt(sum('load'))} кВт·ч`, `пик ${fmt(ext('load_max', Math.max), 0)} Вт${avg('load')}`],
       ['Сеть ≈', `${fmt(sum('grid'))} кВт·ч`, avg('grid').replace(' · ', '')],
       ['АКБ', `+${fmt(sum('chg'))} / −${fmt(sum('dis'))} кВт·ч`, `заряд ${fmt(ext('soc_min', Math.min), 0)}–${fmt(ext('soc_max', Math.max), 0)} %`],
-      ...(hasTariff ? [['Деньги', `≈ ${money(sum('cost'))} за сеть`, `сэкономлено ≈ ${money(sum('saved'))}${nDays > 1 && days.length ? ` · ≈${money(sum('cost') / days.length)} в день` : ''}`]] : []),
+      ...(hasTariff ? [['Деньги за сеть', `≈ ${money(sum('cost'))}`, `сэкономлено ≈ ${money(sum('saved'))}${nDays > 1 && days.length ? ` · ≈${money(sum('cost') / days.length)} в день` : ''}`]] : []),
+      ...(hasTariff && days.some((d) => d.cost_night !== undefined) ? [
+        ['Днём', `≈ ${money(sum('cost') - sum('cost_night'))}`, `${fmt(sum('grid_day'))} кВт·ч из сети`],
+        ['Ночью', `≈ ${money(sum('cost_night'))}`, `${fmt(sum('grid_night'))} кВт·ч из сети`],
+      ] : []),
       ['Без света', outs.length ? span(offSecs) : 'не было', outs.length ? `${outs.length} раз` + (outs.length > 1 ? ` · самое долгое ${span(Math.max(...outs.map((o) => o.to - o.from)))}` : '') : ''],
     ].map(([l, v, sub]) => `<div><span>${l}</span><b>${v}</b>${sub ? `<small>${sub}</small>` : ''}</div>`).join('');
     const long = nDays > 1, MAXROWS = 30;
@@ -200,12 +206,15 @@
   // ---- table (always days/months of the data loaded; day rows open the day) ----
   function table() {
     const R = rows().filter((r) => SER.some((s) => r[s.k])).reverse();
-    const tot = {}; for (const r of R) for (const k of [...SER.map((s) => s.k), 'cost']) tot[k] = (tot[k] || 0) + (r[k] || 0);
-    const mc = (v) => (hasTariff ? `<td>${v ? v.toFixed(v < 100 ? 2 : 0) : '—'}</td>` : '');
+    const tot = {}; for (const r of R) for (const k of [...SER.map((s) => s.k), 'cost', 'cost_night']) tot[k] = (tot[k] || 0) + (r[k] || 0);
+    const zones = hasTariff && R.some((r) => r.cost_night !== undefined);
+    const m2 = (v) => `<td>${v ? v.toFixed(v < 100 ? 2 : 0) : '—'}</td>`;
+    const mc = (r) => (!hasTariff ? '' : zones ? m2((r.cost || 0) - (r.cost_night || 0)) + m2(r.cost_night) : m2(r.cost));
+    const mh = !hasTariff ? '' : zones ? `<th>днём, ${cur}</th><th>ночью, ${cur}</th>` : `<th>${cur}</th>`;
     const f = (v) => (v ? v.toFixed(1) : '—');
-    $('#st-table').innerHTML = R.length ? `<table class="stab"><tr><th></th>${SER.map((s) => `<th style="color:${s.color}">${s.label}</th>`).join('')}${hasTariff ? `<th>${cur}</th>` : ''}</tr>
-      <tr class="tot"><td>Итого</td>${SER.map((s) => `<td>${f(tot[s.k])}</td>`).join('')}${mc(tot.cost)}</tr>
-      ${R.map((r) => `<tr${r.day.length === 10 ? ` class="link${range === 'day' && r.day === day ? ' sel' : ''}" data-day="${r.day}"` : ` class="link" data-month="${r.day}"`}><td>${r.label}</td>${SER.map((s) => `<td>${f(r[s.k])}</td>`).join('')}${mc(r.cost)}</tr>`).join('')}</table>
+    $('#st-table').innerHTML = R.length ? `<table class="stab"><tr><th></th>${SER.map((s) => `<th style="color:${s.color}">${s.label}</th>`).join('')}${mh}</tr>
+      <tr class="tot"><td>Итого</td>${SER.map((s) => `<td>${f(tot[s.k])}</td>`).join('')}${mc(tot)}</tr>
+      ${R.map((r) => `<tr${r.day.length === 10 ? ` class="link${range === 'day' && r.day === day ? ' sel' : ''}" data-day="${r.day}"` : ` class="link" data-month="${r.day}"`}><td>${r.label}</td>${SER.map((s) => `<td>${f(r[s.k])}</td>`).join('')}${mc(r)}</tr>`).join('')}</table>
       <p class="muted small">кВт·ч. Считается на сервере по каждому пакету от плат (раз в 5 с). «Сеть ≈» — оценка по балансу: инвертор не измеряет мощность сети${hasTariff ? `, поэтому и деньги — оценка (${cur} считаются по тарифу на каждый час)` : ''}. Нажми на строку, чтобы открыть ${range === '12m' ? 'месяц' : 'день'}.</p>`
       : '<div class="empty">Пока нет данных за этот период.</div>';
     document.querySelectorAll('#st-table [data-day]').forEach((tr) => (tr.onclick = () => openDay(tr.dataset.day)));
