@@ -92,20 +92,17 @@
     </section>
     <section data-page="stats" id="page-stats" hidden>
       <div class="panel">
-        <div class="ph"><h2>Энергия по дням</h2><div class="row" id="st-ranges"></div></div>
-        <div class="legend toggles" id="st-legend"></div>
-        <canvas id="st-chart" class="xtall"></canvas>
-        <div class="small" id="st-tip">&nbsp;</div>
-      </div>
-      <div class="panel" id="st-day">
-        <div class="ph"><h2>День</h2><div class="row">
+        <div class="ph"><h2 id="st-title">Энергия по дням</h2><div class="row" id="st-ranges"></div></div>
+        <div class="row" id="sd-nav" hidden>
           <button class="btn" id="sd-prev" title="Предыдущий день">‹</button>
           <input type="date" id="sd-date">
           <button class="btn" id="sd-next" title="Следующий день">›</button>
-          <button class="btn" id="sd-today">Сегодня</button></div></div>
-        <div class="facts" id="sd-facts"></div>
-        <div class="legend" id="sd-legend"></div>
-        <canvas id="sd-chart" class="tall"></canvas>
+          <button class="btn" id="sd-today">Сегодня</button>
+        </div>
+        <div class="facts" id="sd-facts" hidden></div>
+        <div class="legend toggles" id="st-legend"></div>
+        <canvas id="st-chart" class="xtall"></canvas>
+        <div class="small" id="st-tip">&nbsp;</div>
         <div id="sd-out"></div>
       </div>
       <div class="panel" id="st-table"></div>

@@ -251,3 +251,5 @@ nav a { color: var(--muted); } nav a.on { color: var(--fg); }
 #sd-facts { margin: 4px 0 10px; }
 #sd-out h3 { margin-top: 12px; }
 input[type=date] { color-scheme: dark; }
+.stab tr.sel td { background: rgba(78,163,255,.16); }
+#sd-nav { margin: 2px 0 8px; }
