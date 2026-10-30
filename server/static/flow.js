@@ -38,7 +38,7 @@
       `<rect id="fb-pv" x="208" y="58" width="84" height="44" rx="8" class="fbox" style="stroke:${C.pv}"/>` +
       T('fv-pv', 250, 78, 'fv') + T('fe-pv', 250, 94, 'fsub') + T('fs-pv', 300, 84, 'fs', 'start') +
       // grid
-      ICON.grid(32, 178) + `<line id="grid-x" x1="26" y1="176" x2="76" y2="234" class="fcross"/>` +
+      ICON.grid(32, 178) + `<g id="grid-x"><line x1="26" y1="176" x2="76" y2="234" class="fcross"/><line x1="76" y1="176" x2="26" y2="234" class="fcross"/></g>` +
       box('grid', 108, 189, C.grid) + T('fl-grid', 150, 242, 'flab', 'middle', 'Из сети сегодня') + T('fe-grid', 150, 264, 'fe') +
       T('fg-1', 208, 168, 'fs', 'end') + T('fg-2', 208, 183, 'fs', 'end') +
       // inverter body
