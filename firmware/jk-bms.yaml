@@ -82,6 +82,12 @@ sensor:
     capacity_remaining:
       id: b_cap
       name: "Остаток АКБ Ah"
+    full_charge_capacity:
+      id: b_fcc
+      name: "Ёмкость полного заряда Ah"
+    charging_cycles:
+      id: b_cycles
+      name: "Циклы заряда"
     temperature_sensor_1:
       id: b_t1
       name: "Темп АКБ T1"
@@ -187,6 +193,25 @@ text_sensor:
 button:
   - platform: restart
     name: "Перезагрузка RST"
+  - platform: jk_bms_ble
+    jk_bms_ble_id: bms0
+    retrieve_settings:
+      name: "Прочитать настройки BMS"
+
+# Калибровка SOC. BMS считает заряд по ампер-часам от заданной ёмкости и
+# сама выставляет 100 % / 0 %, когда ячейка доходит до порогов SOC100 / SOC0.
+# «Установить заряд» записывает текущий процент напрямую (только JK02_32S).
+number:
+  - platform: jk_bms_ble
+    jk_bms_ble_id: bms0
+    total_battery_capacity:
+      name: "Ёмкость АКБ Ah"
+    cell_soc100_voltage:
+      name: "Порог SOC 100% V"
+    cell_soc0_voltage:
+      name: "Порог SOC 0% V"
+    soc_calibration:
+      name: "Установить заряд SOC"
 
 # Push to solarbox (standalone dashboard on the main router container).
 http_request:
@@ -214,6 +239,8 @@ interval:
                   put("bms_a", id(b_a).state);
                   put("bms_w", id(b_w).state);
                   put("cap_ah", id(b_cap).state);
+                  put("fcc_ah", id(b_fcc).state);
+                  put("cycles", id(b_cycles).state);
                   put("t1", id(b_t1).state);
                   put("t2", id(b_t2).state);
                   put("t_mos", id(b_tmos).state);

@@ -61,6 +61,11 @@
         <div class="facts"><div><span>Ошибки</span><b id="bms-errors">—</b></div><div><span>Наработка</span><b id="bms-runtime">—</b></div></div>
       </div>
       <div class="panel"><h2>Ячейки за сутки</h2><div class="legend" id="cells-legend"></div><canvas id="cells-chart" class="tall"></canvas></div>
+      <div class="panel"><h2>Калибровка заряда</h2>
+        <p class="muted small">BMS считает заряд по ампер-часам от ёмкости и сама ставит 100&nbsp;% / 0&nbsp;%, когда любая ячейка доходит до порога. Если порог выше, чем ячейки получают от инвертора, проценты уплывают.</p>
+        <div id="bms-cal"></div>
+        <p class="muted small adm-hint">Менять — после входа («Войти» в меню).</p>
+      </div>
     </section>
 
     <section data-page="inverter" id="page-inverter" hidden>

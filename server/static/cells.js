@@ -94,8 +94,45 @@
   }
   SB.cellTiles = tiles;
 
+  // ---- SOC calibration: BMS settings read/written through the board ----
+  const CAL = [
+    { id: 'cap', path: 'number/Ёмкость АКБ Ah', l: 'Ёмкость АКБ', unit: 'Ah', min: 2, max: 2000, step: 1 },
+    { id: 's100', path: 'number/Порог SOC 100% V', l: 'Порог SOC 100 % (ячейка)', unit: 'В', min: 3.3, max: 3.65, step: 0.001, hint: true },
+    { id: 's0', path: 'number/Порог SOC 0% V', l: 'Порог SOC 0 % (ячейка)', unit: 'В', min: 2.5, max: 3.2, step: 0.001 },
+    { id: 'soc', path: 'number/Установить заряд SOC', l: 'Установить заряд сейчас', unit: '%', min: 0, max: 100, step: 1, write: true },
+  ];
+  async function calib() {
+    const el = $('#bms-cal');
+    const get = async (p) => { try { return await entity('bms', p); } catch (e) { return undefined; } };
+    const vals = await Promise.all(CAL.map((c) => get(c.path)));
+    let inv; try { const q = (await entity('inverter', 'text_sensor/inverter raw qpiri')).value.replace('(', '').trim().split(/\s+/); inv = +q[10] / N; } catch (e) {}
+    if (vals.every((x) => x === undefined)) { el.innerHTML = '<div class="empty">Плата BMS не отвечает или прошивка без калибровки.</div>'; return; }
+    el.innerHTML = CAL.map((c, i) => {
+      const x = vals[i]?.value;
+      const cur = c.write ? `сейчас BMS показывает ${num(v('bms', 'soc'), 0)} %` : `сейчас: ${x ?? '—'} ${c.unit}` +
+        (c.hint && inv ? ` · инвертор заряжает до ${inv.toFixed(3)} В на ячейку${+x > inv ? ' — <b class="bad">порог выше, 100 % не наступит</b>' : ''}` : '');
+      return `<div class="srow"><span class="lab">${c.l}</span><span class="cur">${cur}</span>
+        <span class="ctl"><input type="number" data-cal="${c.id}" min="${c.min}" max="${c.max}" step="${c.step}" value="${c.write ? '' : esc(x ?? '')}" style="width:90px"> ${c.unit}
+        <button class="btn adm" data-calap="${c.id}">${c.write ? 'Установить' : 'Применить'}</button></span></div>`;
+    }).join('') +
+      `<div class="facts"><div><span>Ёмкость полного заряда</span><b>${num(v('bms', 'fcc_ah'), 0)} Ah</b></div><div><span>Циклы заряда</span><b>${num(v('bms', 'cycles'), 0)}</b></div></div>` +
+      `<div class="row"><button class="btn adm" id="cal-reread">Перечитать из BMS</button></div>`;
+    CAL.forEach((c) => (document.querySelector(`[data-calap="${c.id}"]`).onclick = async () => {
+      if (!SB.requireAdmin()) return;
+      const val = document.querySelector(`[data-cal="${c.id}"]`).value;
+      if (val === '' || +val < c.min || +val > c.max) return SB.toast(`Нужно число от ${c.min} до ${c.max}`, true);
+      if (!(await SB.ask(`${c.l}: записать в BMS ${val} ${c.unit}?`))) return;
+      try { await SB.act('bms', c.path, 'set', val); SB.toast('Записано в BMS'); setTimeout(calib, 3000); }
+      catch (e) { SB.toast('Не получилось: ' + e.message, true); }
+    }));
+    $('#cal-reread').onclick = async () => {
+      if (!SB.requireAdmin()) return;
+      try { await SB.act('bms', 'button/Прочитать настройки BMS', 'press'); setTimeout(calib, 3000); } catch (e) { SB.toast(e.message, true); }
+    };
+  }
+
   page('cells', {
-    show() { extrasAt = 0; chartAt = 0; },
+    show() { extrasAt = 0; chartAt = 0; calib(); },
     tick() { tiles($('#cells-tiles')); bars(); facts(); extras(); chart(); },
   });
 })();
