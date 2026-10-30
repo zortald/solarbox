@@ -130,7 +130,7 @@
         (days.some((d) => d.cost_night !== undefined)
           ? `день ${money(sum('cost') - sum('cost_night'))} · ${fmt(sum('grid_day'))} кВт·ч &nbsp;|&nbsp; ночь ${money(sum('cost_night'))} · ${fmt(sum('grid_night'))} кВт·ч<br>`
           : '') + `сэкономлено ≈ ${money(sum('saved'))}${nDays > 1 && days.length ? ` · ≈${money(sum('cost') / days.length)}/день` : ''}`]] : []),
-      ['Без света', outs.length ? span(offSecs) : 'не было', outs.length ? `${outs.length} раз` + (outs.length > 1 ? ` · макс. ${span(Math.max(...outs.map((o) => o.to - o.from)))}` : '') : ''],
+      ['Без света', outs.length ? span(offSecs) : 'не было', outs.length ? `${outs.length} раз` + (outs.length > 1 || outs.some((o) => o.from !== o.start || o.to !== (o.end ?? o.to)) ? ` · макс. ${span(Math.max(...outs.map((o) => (o.end ?? Math.floor(Date.now() / 1000)) - o.start)))}` : '') : ''],
     ].map(([l, v, sub]) => `<div${l.startsWith('Деньги') ? ' class="w2"' : ''}><span>${l}</span><b>${v}</b>${sub ? `<small>${sub}</small>` : ''}</div>`).join('');
     const long = nDays > 1, MAXROWS = 30;
     const when = (t) => { const d = new Date(t * 1000); return (long ? `${d.getDate()}.${p2(d.getMonth() + 1)} ` : '') + hm(t); };
