@@ -20,26 +20,39 @@
   ];
   const OUT_BG = 'rgba(248,81,73,0.22)';
   // [key, label, days of energy data to fetch]; «day» also fetches 30 for the table
-  const RANGES = [['day', 'День', 30], ['7d', '7 дней', 7], ['30d', '30 дней', 30], ['12m', '12 месяцев', 366]];
+  // «month» fetches from the month's start up to today (computed in fetchData)
+  const RANGES = [['day', 'День', 30], ['month', 'Месяц', 0], ['7d', '7 дней', 7], ['30d', '30 дней', 30], ['12m', '12 месяцев', 366]];
+  const rng = (k) => RANGES.find((x) => x[0] === k) || RANGES.find((x) => x[0] === '30d');
   const load = (k, d) => { try { return JSON.parse(localStorage.getItem(k)) ?? d; } catch (e) { return d; } };
   const save = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) {} };
   let range = load('sbStatsRange', '30d');
   if (!RANGES.some((r) => r[0] === range)) range = '30d';
   const hidden = new Set(load('sbStatsHidden', ['chg', 'dis'])), dayHidden = new Set(load('sbDayHidden', []));
-  let data = null, day = null, dayData = null;
+  let data = null, day = null, dayData = null, month = null;
   const MONTHS = ['янв', 'фев', 'мар', 'апр', 'май', 'июн', 'июл', 'авг', 'сен', 'окт', 'ноя', 'дек'];
   const p2 = (n) => String(n).padStart(2, '0');
   const iso = (d) => `${d.getFullYear()}-${p2(d.getMonth() + 1)}-${p2(d.getDate())}`;
   const shift = (key, n) => { const d = new Date(key + 'T12:00:00'); d.setDate(d.getDate() + n); return iso(d); };
   const hm = (t) => { const d = new Date(t * 1000); return `${p2(d.getHours())}:${p2(d.getMinutes())}`; };
   const span = (s) => s >= 3600 ? `${Math.floor(s / 3600)} ч ${Math.round((s % 3600) / 60)} мин` : `${Math.max(1, Math.round(s / 60))} мин`;
+  const MONTHS_FULL = ['Январь', 'Февраль', 'Март', 'Апрель', 'Май', 'Июнь', 'Июль', 'Август', 'Сентябрь', 'Октябрь', 'Ноябрь', 'Декабрь'];
+  const thisMonth = () => iso(new Date()).slice(0, 7);
+  const nextMonth = (m) => { let [y, mo] = m.split('-').map(Number); mo++; if (mo > 12) { mo = 1; y++; } return `${y}-${p2(mo)}`; };
+  const prevMonth = (m) => { let [y, mo] = m.split('-').map(Number); mo--; if (mo < 1) { mo = 12; y--; } return `${y}-${p2(mo)}`; };
+  const monthLabel = (m) => `${MONTHS_FULL[+m.slice(5) - 1]} ${m.slice(0, 4)}`;
   const dayLabel = (key) => { const d = new Date(key + 'T12:00:00'); return `${d.getDate()} ${MONTHS[d.getMonth()]} ${d.getFullYear()}`; };
 
   // ---- bars: days or months ----
   function rows() {
     if (!data) return [];
-    const r = RANGES.find((x) => x[0] === range) || RANGES[2];
+    const r = rng(range);
     const days = data.days;
+    if (r[0] === 'month') {
+      const by = Object.fromEntries(days.map((d) => [d.day, d]));
+      const out = [];
+      for (let key = month + '-01'; key.slice(0, 7) === month; key = shift(key, 1)) out.push({ ...(by[key] || {}), day: key, label: String(+key.slice(8)) });
+      return out;
+    }
     if (r[0] !== '12m') {
       // fill missing days so the axis is continuous
       const out = [], end = new Date(data.today + 'T12:00:00');
@@ -88,12 +101,12 @@
       if (i % every === 0) { ctx.fillStyle = muted; ctx.textAlign = 'center'; ctx.textBaseline = 'top'; ctx.fillText(r.label, L + i * gw + gw / 2, H - B + 5); }
     });
     const at = (e) => R[Math.floor((e.clientX - canvas.getBoundingClientRect().left - L) / gw)];
-    canvas.onclick = (e) => { const r = at(e); if (r && r.day.length === 10) openDay(r.day); };
-    canvas.style.cursor = range === '12m' ? '' : 'pointer';
+    canvas.onclick = (e) => { const r = at(e); if (r) r.day.length === 10 ? openDay(r.day) : openMonth(r.day); };
+    canvas.style.cursor = 'pointer';
     canvas.onmousemove = (e) => {
       const r = at(e);
       $('#st-tip').innerHTML = r ? `<b>${r.label}</b> · ` + shown.map((s) => `<span style="color:${s.color}">${s.label} ${(r[s.k] || 0).toFixed(1)}</span>`).join(' · ') +
-        ' кВт·ч' + (r.day.length === 10 ? ' <span class="muted">— нажми, чтобы открыть день</span>' : '') : '&nbsp;';
+        ' кВт·ч <span class="muted">— нажми, чтобы открыть ' + (r.day.length === 10 ? 'день' : 'месяц') + '</span>' : '&nbsp;';
     };
     canvas.ontouchmove = canvas.onmouseleave = null;
   }
@@ -123,6 +136,13 @@
     const now = Math.floor(Date.now() / 1000);
     return (items || []).filter((o) => o.start < to && (o.end ?? now) > from).map((o) => ({ ...o, from: Math.max(o.start, from), to: Math.min(o.end ?? now, to) }));
   };
+
+  function openMonth(m) {
+    month = m; save('sbStatsMonth', month);
+    if (range !== 'month') { range = 'month'; save('sbStatsRange', range); controls(); }
+    $('#page-stats').scrollIntoView({ behavior: 'smooth', block: 'start' });
+    fetchData();
+  }
 
   // ---- one day: totals, peaks, power chart with outages, outage list ----
   function openDay(key) {
@@ -181,22 +201,27 @@
     const f = (v) => (v ? v.toFixed(1) : '—');
     $('#st-table').innerHTML = R.length ? `<table class="stab"><tr><th></th>${SER.map((s) => `<th style="color:${s.color}">${s.label}</th>`).join('')}</tr>
       <tr class="tot"><td>Итого</td>${SER.map((s) => `<td>${f(tot[s.k])}</td>`).join('')}</tr>
-      ${R.map((r) => `<tr${r.day.length === 10 ? ` class="link${range === 'day' && r.day === day ? ' sel' : ''}" data-day="${r.day}"` : ''}><td>${r.label}</td>${SER.map((s) => `<td>${f(r[s.k])}</td>`).join('')}</tr>`).join('')}</table>
-      <p class="muted small">кВт·ч. Считается на сервере по каждому пакету от плат (раз в 5 с). «Сеть ≈» — оценка по балансу: инвертор не измеряет мощность сети. Нажми на день, чтобы открыть его график.</p>`
+      ${R.map((r) => `<tr${r.day.length === 10 ? ` class="link${range === 'day' && r.day === day ? ' sel' : ''}" data-day="${r.day}"` : ` class="link" data-month="${r.day}"`}><td>${r.label}</td>${SER.map((s) => `<td>${f(r[s.k])}</td>`).join('')}</tr>`).join('')}</table>
+      <p class="muted small">кВт·ч. Считается на сервере по каждому пакету от плат (раз в 5 с). «Сеть ≈» — оценка по балансу: инвертор не измеряет мощность сети. Нажми на строку, чтобы открыть ${range === '12m' ? 'месяц' : 'день'}.</p>`
       : '<div class="empty">Пока нет данных за этот период.</div>';
     document.querySelectorAll('#st-table [data-day]').forEach((tr) => (tr.onclick = () => openDay(tr.dataset.day)));
+    document.querySelectorAll('#st-table [data-month]').forEach((tr) => (tr.onclick = () => openMonth(tr.dataset.month)));
   }
 
   function render() {
     const isDay = range === 'day';
     $('#sd-nav').hidden = !isDay;
+    $('#sm-nav').hidden = range !== 'month';
     if (isDay) dayView();
     else {
-      const r = RANGES.find((x) => x[0] === range);
-      const first = range === '12m' ? (data.days[0]?.day || data.today) : shift(data.today || iso(new Date()), -(r[2] - 1));
-      const from = Math.floor(new Date(first + 'T00:00:00') / 1000), to = Math.floor(Date.now() / 1000);
-      summary(data.days.filter((d) => d.day >= first), clipOuts(periodOuts, from, to), 2);
-      $('#st-title').textContent = range === '12m' ? 'Энергия по месяцам' : 'Энергия по дням';
+      const r = rng(range);
+      let first, end = '9999-12-31';
+      if (range === 'month') { first = month + '-01'; end = nextMonth(month) + '-01'; }
+      else first = range === '12m' ? (data.days[0]?.day || data.today) : shift(data.today || iso(new Date()), -(r[2] - 1));
+      const from = Math.floor(new Date(first + 'T00:00:00') / 1000);
+      const to = Math.min(Math.floor(Date.now() / 1000), range === 'month' ? Math.floor(new Date(end + 'T00:00:00') / 1000) : Infinity);
+      summary(data.days.filter((d) => d.day >= first && d.day < end), clipOuts(periodOuts, from, to), 2);
+      $('#st-title').textContent = range === 'month' ? monthLabel(month) : range === '12m' ? 'Энергия по месяцам' : 'Энергия по дням';
       $('#st-legend').innerHTML = SER.map((s) => `<label><input type="checkbox" data-k="${s.k}"${hidden.has(s.k) ? '' : ' checked'}><i style="background:${s.color}"></i>${s.label}</label>`).join('');
       document.querySelectorAll('#st-legend [data-k]').forEach((i) => (i.onchange = () => {
         i.checked ? hidden.delete(i.dataset.k) : hidden.add(i.dataset.k); save('sbStatsHidden', [...hidden]); bars();
@@ -213,6 +238,15 @@
     }));
   }
 
+  function monthControls() {
+    const go = (m) => { if (m && m <= thisMonth()) { month = m; save('sbStatsMonth', month); fetchData(); } };
+    $('#sm-month').max = thisMonth();
+    $('#sm-month').onchange = () => go($('#sm-month').value);
+    $('#sm-prev').onclick = () => go(prevMonth(month));
+    $('#sm-next').onclick = () => go(nextMonth(month));
+    $('#sm-this').onclick = () => go(thisMonth());
+  }
+
   function dayControls() {
     const go = (key) => { if (key && key <= iso(new Date())) { day = key; save('sbStatsDay', day); loadDay(); } };
     $('#sd-date').max = iso(new Date());
@@ -224,11 +258,19 @@
 
   let periodOuts = [];
   async function fetchData() {
-    const r = RANGES.find((x) => x[0] === range) || RANGES[2];
+    const r = rng(range);
     const now = Math.floor(Date.now() / 1000);
+    let days = r[2], from = now - r[2] * 86400, to = now;
+    if (range === 'month') {
+      $('#sm-month').value = month;
+      $('#sm-next').disabled = month >= thisMonth();
+      from = Math.floor(new Date(month + '-01T00:00:00') / 1000);
+      to = Math.min(now, Math.floor(new Date(nextMonth(month) + '-01T00:00:00') / 1000));
+      days = Math.max(1, Math.ceil((now - from) / 86400) + 1);
+    }
     const [d, o] = await Promise.all([
-      api('/api/energy?days=' + r[2]).catch(() => ({ days: [], today: '' })),
-      api(`/api/outages?from=${now - r[2] * 86400}&to=${now}`).catch(() => ({ items: [] })),
+      api('/api/energy?days=' + days).catch(() => ({ days: [], today: '' })),
+      api(`/api/outages?from=${from}&to=${to}`).catch(() => ({ items: [] })),
     ]);
     data = d; periodOuts = o.items || [];
     render();
@@ -237,7 +279,9 @@
   page('stats', { show() {
     day = day || load('sbStatsDay', null) || iso(new Date());
     if (day > iso(new Date())) day = iso(new Date());
-    controls(); dayControls(); fetchData();
+    month = month || load('sbStatsMonth', null) || thisMonth();
+    if (month > thisMonth()) month = thisMonth();
+    controls(); dayControls(); monthControls(); fetchData();
   } });
   window.addEventListener('resize', () => { if (!$('#page-stats').hidden) render(); });
 })();
