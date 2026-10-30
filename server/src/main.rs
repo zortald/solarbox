@@ -126,6 +126,11 @@ async fn main() {
         let c = db.lock().unwrap();
         let tz = state.config.get().timezone;
         let _ = energy::init(&c);
+        match energy::backfill_ext(&c, &tz) {
+            Ok(n) if n > 0 => eprintln!("[energy] rebuilt daily peaks from history ({n} records)"),
+            Ok(_) => {}
+            Err(e) => eprintln!("[energy] backfill peaks: {e}"),
+        }
         match energy::backfill(&c, &tz) {
             Ok(n) if n > 0 => eprintln!("[energy] rebuilt daily totals from history ({n} steps)"),
             Ok(_) => {}
@@ -311,6 +316,12 @@ async fn ingest(State(st): State<AppState>, headers: HeaderMap, Json(body): Json
                         serde_json::json!({ "device": it.device, "ts": ts, "metrics": it.metrics }).to_string(),
                     );
                     let tz = st.config.get().timezone;
+                    let recs = st.energy.extremes(&it.device, ts, &it.metrics, &tz);
+                    if !recs.is_empty() {
+                        if let Err(e) = energy::store_ext(&c, &recs) {
+                            eprintln!("[energy] peaks: {e}");
+                        }
+                    }
                     let deltas = st.energy.feed(&it.device, ts, &it.metrics, &tz);
                     if !deltas.is_empty() {
                         if let Err(e) = energy::store(&c, &deltas) {

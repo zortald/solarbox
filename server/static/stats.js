@@ -98,6 +98,32 @@
     canvas.ontouchmove = canvas.onmouseleave = null;
   }
 
+  // ---- summary for any period: totals, peaks, SOC range, outages ----
+  const fmt = (v, d = 1) => (v === undefined || v === null || !isFinite(v) ? '—' : (+v).toFixed(d));
+  function summary(days, outs, nDays) {
+    const sum = (k) => days.reduce((a, d) => a + (d[k] || 0), 0);
+    const ext = (k, fn) => { const v = days.map((d) => d[k]).filter((x) => x !== undefined); return v.length ? fn(...v) : undefined; };
+    const offSecs = outs.reduce((a, o) => a + (o.to - o.from), 0);
+    const avg = (k) => (nDays > 1 && days.length ? ` · ≈${fmt(sum(k) / days.length)} в день` : '');
+    $('#sd-facts').innerHTML = [
+      ['Солнце', `${fmt(sum('pv'))} кВт·ч`, `пик ${fmt(ext('pv_max', Math.max), 0)} Вт${avg('pv')}`],
+      ['Дом', `${fmt(sum('load'))} кВт·ч`, `пик ${fmt(ext('load_max', Math.max), 0)} Вт${avg('load')}`],
+      ['Сеть ≈', `${fmt(sum('grid'))} кВт·ч`, avg('grid').replace(' · ', '')],
+      ['АКБ', `+${fmt(sum('chg'))} / −${fmt(sum('dis'))} кВт·ч`, `заряд ${fmt(ext('soc_min', Math.min), 0)}–${fmt(ext('soc_max', Math.max), 0)} %`],
+      ['Без света', outs.length ? span(offSecs) : 'не было', outs.length ? `${outs.length} раз` + (outs.length > 1 ? ` · самое долгое ${span(Math.max(...outs.map((o) => o.to - o.from)))}` : '') : ''],
+    ].map(([l, v, sub]) => `<div><span>${l}</span><b>${v}</b>${sub ? `<small>${sub}</small>` : ''}</div>`).join('');
+    const long = nDays > 1, MAXROWS = 30;
+    const when = (t) => { const d = new Date(t * 1000); return (long ? `${d.getDate()}.${p2(d.getMonth() + 1)} ` : '') + hm(t); };
+    $('#sd-out').innerHTML = outs.length ? '<h3>Отключения</h3><table class="olist">' + outs.slice(0, MAXROWS).map((o) =>
+      `<tr><td>${when(o.start)} – ${o.end ? hm(o.end) : 'сейчас'}</td><td>${span((o.end ?? Math.floor(Date.now() / 1000)) - o.start)}</td>` +
+      `<td>${o.soc_start != null ? `АКБ ${Math.round(o.soc_start)}${o.soc_end != null ? ' → ' + Math.round(o.soc_end) : ''} %` : ''}</td></tr>`).join('') + '</table>' +
+      (outs.length > MAXROWS ? `<p class="muted small">и ещё ${outs.length - MAXROWS} — все на странице «Отключения»</p>` : '') : '';
+  }
+  const clipOuts = (items, from, to) => {
+    const now = Math.floor(Date.now() / 1000);
+    return (items || []).filter((o) => o.start < to && (o.end ?? now) > from).map((o) => ({ ...o, from: Math.max(o.start, from), to: Math.min(o.end ?? now, to) }));
+  };
+
   // ---- one day: totals, peaks, power chart with outages, outage list ----
   function openDay(key) {
     day = key; save('sbStatsDay', day);
@@ -116,8 +142,7 @@
       api(`/api/outages?from=${from}&to=${to}`).catch(() => ({ items: [] })),
       api('/api/energy?days=800').catch(() => ({ days: [] })),
     ]);
-    const outs = (out.items || []).filter((o) => o.start < to && (o.end ?? now) > from)
-      .map((o) => ({ ...o, from: Math.max(o.start, from), to: Math.min(o.end ?? now, to) }));
+    const outs = clipOuts(out.items, from, to);
     dayData = { day, from, to, series, outs, kwh: (energy.days || []).find((d) => d.day === day) || {} };
     if (range === 'day') render();
   }
@@ -126,18 +151,13 @@
     if (!dayData || dayData.day !== day) { loadDay(); return; }
     const { from, to, series, outs, kwh } = dayData;
     const s = Object.fromEntries(DAYSER.map((c, i) => [c.k, series[i]]));
-    const peak = (k) => (s[k].v.length ? Math.max(...s[k].v) : undefined);
-    const low = (k) => (s[k].v.length ? Math.min(...s[k].v) : undefined);
-    const f = (v, d = 1) => (v === undefined || v === null ? '—' : (+v).toFixed(d));
-    const offSecs = outs.reduce((a, o) => a + (o.to - o.from), 0);
+    // Exact daily peaks come from the server; the curve is only a fallback.
+    const fromCurve = (k, fn) => (s[k].v.length ? fn(...s[k].v) : undefined);
+    const k = { ...kwh };
+    k.pv_max ??= fromCurve('pv', Math.max); k.load_max ??= fromCurve('load', Math.max);
+    k.soc_min ??= fromCurve('soc', Math.min); k.soc_max ??= fromCurve('soc', Math.max);
     $('#st-title').textContent = dayLabel(day);
-    $('#sd-facts').innerHTML = [
-      ['Солнце', `${f(kwh.pv)} кВт·ч`, `пик ${f(peak('pv'), 0)} Вт`],
-      ['Дом', `${f(kwh.load)} кВт·ч`, `пик ${f(peak('load'), 0)} Вт`],
-      ['Сеть ≈', `${f(kwh.grid)} кВт·ч`, ''],
-      ['АКБ', `+${f(kwh.chg)} / −${f(kwh.dis)} кВт·ч`, `заряд ${f(low('soc'), 0)}–${f(peak('soc'), 0)} %`],
-      ['Без света', outs.length ? span(offSecs) : 'не было', outs.length ? `${outs.length} раз` : ''],
-    ].map(([l, v, sub]) => `<div><span>${l}</span><b>${v}</b>${sub ? `<small>${sub}</small>` : ''}</div>`).join('');
+    summary([k], outs, 1);
     $('#st-legend').innerHTML = DAYSER.map((c) => `<label><input type="checkbox" data-dk="${c.k}"${dayHidden.has(c.k) ? '' : ' checked'}>` +
       `<i style="background:${c.color}"></i>${c.label}${c.axis === 'right' ? ' (правая шкала)' : ''}</label>`).join('') +
       `<label><i style="background:${OUT_BG};width:18px"></i>фон — без света</label>`;
@@ -152,9 +172,6 @@
       series: DAYSER.filter((c) => !dayHidden.has(c.k)).map((c) => ({ ...s[c.k], color: c.color, label: c.label, unit: c.unit, axis: c.axis, fixed: c.fixed })),
     });
     $('#st-tip').innerHTML = '&nbsp;';
-    $('#sd-out').innerHTML = outs.length ? '<h3>Отключения</h3><table class="olist">' + outs.map((o) =>
-      `<tr><td>${hm(o.start)} – ${o.end ? hm(o.end) : 'сейчас'}</td><td>${span((o.end ?? Math.floor(Date.now() / 1000)) - o.start)}</td>` +
-      `<td>${o.soc_start != null ? `АКБ ${Math.round(o.soc_start)}${o.soc_end != null ? ' → ' + Math.round(o.soc_end) : ''} %` : ''}</td></tr>`).join('') + '</table>' : '';
   }
 
   // ---- table (always days/months of the data loaded; day rows open the day) ----
@@ -172,10 +189,13 @@
 
   function render() {
     const isDay = range === 'day';
-    $('#sd-nav').hidden = $('#sd-facts').hidden = !isDay;
-    $('#sd-out').innerHTML = '';
+    $('#sd-nav').hidden = !isDay;
     if (isDay) dayView();
     else {
+      const r = RANGES.find((x) => x[0] === range);
+      const first = range === '12m' ? (data.days[0]?.day || data.today) : shift(data.today || iso(new Date()), -(r[2] - 1));
+      const from = Math.floor(new Date(first + 'T00:00:00') / 1000), to = Math.floor(Date.now() / 1000);
+      summary(data.days.filter((d) => d.day >= first), clipOuts(periodOuts, from, to), 2);
       $('#st-title').textContent = range === '12m' ? 'Энергия по месяцам' : 'Энергия по дням';
       $('#st-legend').innerHTML = SER.map((s) => `<label><input type="checkbox" data-k="${s.k}"${hidden.has(s.k) ? '' : ' checked'}><i style="background:${s.color}"></i>${s.label}</label>`).join('');
       document.querySelectorAll('#st-legend [data-k]').forEach((i) => (i.onchange = () => {
@@ -202,9 +222,15 @@
     $('#sd-today').onclick = () => go(iso(new Date()));
   }
 
+  let periodOuts = [];
   async function fetchData() {
     const r = RANGES.find((x) => x[0] === range) || RANGES[2];
-    try { data = await api('/api/energy?days=' + r[2]); } catch (e) { data = { days: [], today: '' }; }
+    const now = Math.floor(Date.now() / 1000);
+    const [d, o] = await Promise.all([
+      api('/api/energy?days=' + r[2]).catch(() => ({ days: [], today: '' })),
+      api(`/api/outages?from=${now - r[2] * 86400}&to=${now}`).catch(() => ({ items: [] })),
+    ]);
+    data = d; periodOuts = o.items || [];
     render();
   }
 

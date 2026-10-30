@@ -13,11 +13,20 @@ const MAX_GAP_S: i64 = 120;
 /// Below this the "grid" residual is the inverter's own losses, not grid draw.
 const GRID_MIN_W: f64 = 40.0;
 pub const KEYS: [&str; 5] = ["pv", "load", "chg", "dis", "grid"];
+/// Daily extremes kept exactly (history thinning would flatten short peaks):
+/// key → (device, metric, is_max).
+const EXT: [(&str, &str, &str, bool); 4] = [
+    ("pv_max", "inverter", "pv_w", true),
+    ("load_max", "inverter", "ac_out_w", true),
+    ("soc_min", "bms", "soc", false),
+    ("soc_max", "bms", "soc", true),
+];
 
 #[derive(Default)]
 struct S {
     latest: HashMap<&'static str, f64>,        // pv_w, ac_out_w, bms_w, grid_v
     last: HashMap<&'static str, (i64, f64)>,   // integrated stream → (ts, watts)
+    ext: HashMap<(String, &'static str), f64>, // (day, key) → extreme so far
 }
 
 pub struct Energy {
@@ -30,6 +39,12 @@ pub fn init(conn: &Connection) -> rusqlite::Result<()> {
              day TEXT NOT NULL,
              key TEXT NOT NULL,
              wh  REAL NOT NULL,
+             PRIMARY KEY(day, key)
+         ) WITHOUT ROWID;
+         CREATE TABLE IF NOT EXISTS energy_ext(
+             day TEXT NOT NULL,
+             key TEXT NOT NULL,
+             v   REAL NOT NULL,
              PRIMARY KEY(day, key)
          ) WITHOUT ROWID;",
     )
@@ -90,6 +105,70 @@ impl Energy {
         }
         out
     }
+}
+
+impl Energy {
+    /// New daily records set by this packet (only those — nothing to write otherwise).
+    pub fn extremes(&self, device: &str, ts: i64, metrics: &HashMap<String, f64>, tz: &Tz) -> Vec<(String, &'static str, f64)> {
+        let mut s = self.s.lock().unwrap();
+        let day = tz.day(ts);
+        let mut out = Vec::new();
+        for (key, dev, metric, is_max) in EXT {
+            if dev != device {
+                continue;
+            }
+            let Some(v) = metrics.get(metric).copied().filter(|v| v.is_finite()) else { continue };
+            let k = (day.clone(), key);
+            let better = match s.ext.get(&k) {
+                None => true,
+                Some(&old) => if is_max { v > old } else { v < old },
+            };
+            if better {
+                s.ext.insert(k, v);
+                out.push((day.clone(), key, v));
+            }
+        }
+        // keep only the current day in memory
+        if s.ext.len() > 16 {
+            s.ext.retain(|(d, _), _| *d == day);
+        }
+        out
+    }
+}
+
+pub fn store_ext(conn: &Connection, recs: &[(String, &'static str, f64)]) -> rusqlite::Result<()> {
+    for (day, key, v) in recs {
+        let sql = if key.ends_with("_min") {
+            "INSERT INTO energy_ext(day, key, v) VALUES(?1, ?2, ?3) ON CONFLICT(day, key) DO UPDATE SET v = MIN(v, excluded.v)"
+        } else {
+            "INSERT INTO energy_ext(day, key, v) VALUES(?1, ?2, ?3) ON CONFLICT(day, key) DO UPDATE SET v = MAX(v, excluded.v)"
+        };
+        conn.prepare_cached(sql)?.execute(params![day, key, v])?;
+    }
+    Ok(())
+}
+
+/// One-time fill of daily extremes from stored history (best effort: older
+/// history is already thinned, so its peaks are averages).
+pub fn backfill_ext(conn: &Connection, tz: &Tz) -> rusqlite::Result<usize> {
+    let empty: bool = conn.query_row("SELECT NOT EXISTS(SELECT 1 FROM energy_ext)", [], |r| r.get(0))?;
+    if !empty {
+        return Ok(0);
+    }
+    let mut st = conn.prepare(
+        "SELECT p.ts, m.device, m.metric, p.v FROM points p JOIN metrics m ON m.id = p.mid
+         WHERE (m.device = 'inverter' AND m.metric IN ('pv_w', 'ac_out_w')) OR (m.device = 'bms' AND m.metric = 'soc')",
+    )?;
+    let rows = st.query_map([], |r| Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?, r.get::<_, String>(2)?, r.get::<_, i64>(3)? as f64 / 1000.0)))?;
+    let e = Energy::new();
+    let mut n = 0;
+    for row in rows {
+        let (ts, dev, metric, v) = row?;
+        let recs = e.extremes(&dev, ts, &HashMap::from([(metric, v)]), tz);
+        n += recs.len();
+        store_ext(conn, &recs)?;
+    }
+    Ok(n)
 }
 
 pub fn store(conn: &Connection, deltas: &[(String, &'static str, f64)]) -> rusqlite::Result<()> {
@@ -165,12 +244,29 @@ pub async fn api(State(st): State<AppState>, Query(q): Query<Q>) -> Response {
         Ok(r) => r,
         Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
     };
+    let ext: Vec<(String, String, f64)> = {
+        let c = st.db.lock().unwrap();
+        c.prepare("SELECT day, key, v FROM energy_ext WHERE day >= ?1")
+            .and_then(|mut s| s.query_map(params![from_day], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?.collect())
+            .unwrap_or_default()
+    };
     let mut by: Vec<(String, serde_json::Map<String, serde_json::Value>)> = Vec::new();
     for (day, key, wh) in rows {
         if by.last().map(|(d, _)| d != &day).unwrap_or(true) {
             by.push((day.clone(), serde_json::Map::new()));
         }
         by.last_mut().unwrap().1.insert(key, serde_json::json!((wh / 10.0).round() / 100.0));
+    }
+    for (day, key, v) in ext {
+        let i = match by.iter().position(|(d, _)| *d == day) {
+            Some(i) => i,
+            None => {
+                let i = by.iter().position(|(d, _)| *d > day).unwrap_or(by.len());
+                by.insert(i, (day.clone(), serde_json::Map::new()));
+                i
+            }
+        };
+        by[i].1.insert(key, serde_json::json!((v * 10.0).round() / 10.0));
     }
     let items: Vec<_> = by.into_iter().map(|(day, mut m)| { m.insert("day".into(), day.into()); serde_json::Value::Object(m) }).collect();
     Json(serde_json::json!({ "today": tz.day(now), "keys": KEYS, "days": items })).into_response()
@@ -208,6 +304,18 @@ mod tests {
         near("dis", 400.0);
         near("grid", 100.0);
         assert_eq!(total.get("chg"), None);
+    }
+
+    #[test]
+    fn daily_extremes_only_on_records() {
+        let e = Energy::new();
+        let tz = Tz::default();
+        let t = days_from_civil(2026, 7, 1) * 86_400 + 9 * 3600; // 12:00 local
+        let m = |v: f64| HashMap::from([("soc".to_string(), v)]);
+        assert_eq!(e.extremes("bms", t, &m(80.0), &tz).len(), 2, "first value is both min and max");
+        assert!(e.extremes("bms", t + 5, &m(80.0), &tz).is_empty(), "no new record → nothing to write");
+        assert_eq!(e.extremes("bms", t + 10, &m(75.0), &tz), vec![("2026-07-01".to_string(), "soc_min", 75.0)]);
+        assert!(e.extremes("inverter", t, &m(75.0), &tz).is_empty(), "soc only counts from the bms");
     }
 
     #[test]
