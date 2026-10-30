@@ -9,6 +9,7 @@ mod automations;
 mod boards;
 mod config;
 mod db;
+mod discovery;
 mod energy;
 mod files;
 mod ota;
@@ -63,6 +64,8 @@ struct AppState {
     outages: Arc<outages::Detector>,
     /// Daily energy integrator.
     energy: Arc<energy::Energy>,
+    /// Boards that announced themselves (setup wizard).
+    discovery: Arc<discovery::Discovery>,
 }
 
 #[derive(RustEmbed)]
@@ -116,6 +119,7 @@ async fn main() {
         tg: Arc::new(telegram::Store::open(PathBuf::from(env("SOLARBOX_SECRETS", "/data/secrets.json")))),
         outages: outage_detector,
         energy: Arc::new(energy::Energy::new()),
+        discovery: Arc::new(discovery::Discovery::default()),
     };
     {
         let c = db.lock().unwrap();
@@ -203,6 +207,7 @@ async fn main() {
         .route("/api/catalog", get(catalog))
         .route("/api/compact", post(compact_now))
         .route("/api/boards", get(boards::list))
+        .route("/api/discovered", get(discovery::api))
         .route("/api/board/:name/ping", get(boards::ping))
         .route("/api/board/:name/entity", get(boards::entity))
         .route("/api/board/:name/action", post(boards::action))
@@ -250,6 +255,9 @@ struct Ingest {
     device: String,
     ts: Option<i64>,
     metrics: HashMap<String, f64>,
+    /// Self-description of the sending board (type, fw, mac, ip, …).
+    #[serde(default)]
+    board: Option<serde_json::Value>,
 }
 
 #[derive(Deserialize)]
@@ -281,6 +289,9 @@ async fn ingest(State(st): State<AppState>, headers: HeaderMap, Json(body): Json
         let mut c = st.db.lock().unwrap();
         for it in &items {
             let ts = it.ts.unwrap_or_else(now);
+            if let Some(b) = &it.board {
+                st.discovery.note(&it.device, b, ts);
+            }
             match db::insert(&mut c, &it.device, ts, &it.metrics) {
                 Ok(n) => {
                     stored += n;
