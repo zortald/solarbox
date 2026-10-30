@@ -189,6 +189,12 @@ text_sensor:
       name: "Ошибки ERR"
     total_runtime_formatted:
       name: "Наработка RT"
+    device_model:
+      name: "Модель BMS"
+    hardware_version:
+      name: "Версия железа BMS"
+    software_version:
+      name: "Версия прошивки BMS"
 
 button:
   - platform: restart
