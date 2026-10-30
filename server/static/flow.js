@@ -158,7 +158,10 @@
     houseColours(p);
     set('fe-load', kwh(E.load));
     // battery
-    const soc = v('bms', 'soc'), a = v('bms', 'bms_a'), cap = v('bms', 'cap_ah'), bv = v('bms', 'bms_v') ?? v('inverter', 'batt_v');
+    const soc = v('bms', 'soc'), cap = v('bms', 'cap_ah'), bv = v('bms', 'bms_v') ?? v('inverter', 'batt_v');
+    const a = v('bms', 'bms_a');
+    // full capacity straight from the BMS; from remaining/SOC only as a fallback
+    const full = v('bms', 'fcc_ah') ?? (cap !== undefined && soc ? cap / (soc / 100) : undefined);
     set('fv-batt', W(Math.abs(p.batt)));
     set('fb-temp', v('bms', 't1') !== undefined ? num(v('bms', 't1'), 0) + '°' : '');
     set('fe-chg', kwh(E.chg));
@@ -166,9 +169,9 @@
     set('fb-kwh', cap !== undefined && bv ? (cap * bv / 1000).toFixed(2) + ' kWh' : '');
     set('fb-soc', soc !== undefined ? num(soc, 0) + '%' : '—');
     let e = ['', ''];
-    if (a !== undefined && cap !== undefined && Math.abs(a) > 0.3) {
-      if (a < 0) e = eta(cap * 0.99 / -a, '1%');                       // ~to empty
-      else if (soc) e = eta((cap / (soc / 100) - cap) / a, '100%');   // to full
+    if (a !== undefined && cap !== undefined && full && Math.abs(a) > 0.3) {
+      if (a < 0) e = eta((cap - 0.01 * full) / -a, '1%');   // remaining down to 1 % of full
+      else e = eta((full - cap) / a, '100%');               // the rest up to full (CV taper makes the end slower)
     }
     set('fb-eta1', e[0]); set('fb-eta2', e[1] || (Math.abs(a ?? 0) <= 0.3 ? 'покой' : ''));
     const lvl = soc === undefined ? 0 : Math.ceil(soc / 20);
