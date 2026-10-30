@@ -7,7 +7,7 @@
 
 (() => {
   const { $, v, num, fresh, page, api } = SB;
-  const C = { pv: '#f5b041', load: '#ff9eb5', batt: '#ff9eb5', grid: '#4ea3ff' };
+  const C = { pv: '#f5b041', load: '#ff9eb5', batt: '#3fb950', grid: '#4ea3ff' };
   // Lines run source → inverter (pv, grid, batt) or inverter → load.
   const LINKS = [
     ['pv', 'M250 102 V150'],
@@ -15,7 +15,7 @@
     ['load', 'M285 205 H418'],
     ['batt', 'M250 336 V245'],
   ];
-  let built = false;
+  let built = false, loadColor = null;
 
   const T = (id, x, y, cls, anchor = 'middle', txt = '') => `<text id="${id}" x="${x}" y="${y}" class="${cls}" text-anchor="${anchor}">${txt}</text>`;
   const box = (id, x, y, col) => `<rect id="fb-${id}" x="${x}" y="${y}" width="84" height="32" rx="8" class="fbox" style="stroke:${col}"/>` + T('fv-' + id, x + 42, y + 21, 'fv');
@@ -26,13 +26,13 @@
       <path d="M0 18 L8 0 H34 L26 18 Z M4 9 H30 M13 0 L9 18 M22 0 L18 18"/><path d="M38 2 L32 13 H39 L34 24" class="bolt"/></g>`,
     grid: (x, y) => `<g class="ficon" id="fi-grid" style="stroke:${C.grid}" transform="translate(${x} ${y})">
       <path d="M18 0 L6 50 M18 0 L30 50 M10 34 H26 M12 24 H24 M14 14 H22 M0 12 H36 M3 22 H33 M10 34 L24 24 M26 34 L12 24"/></g>`,
-    load: (x, y) => `<g class="ficon" style="stroke:${C.load}" transform="translate(${x} ${y})">
+    load: (x, y) => `<g class="ficon" id="fi-load" style="stroke:${C.load}" transform="translate(${x} ${y})">
       <path d="M0 22 L24 2 L48 22 M6 18 V48 H42 V18 M18 48 V32 H30 V48"/></g>`,
   };
 
   function build() {
     $('#flow-svg').innerHTML =
-      LINKS.map(([id, d]) => `<path d="${d}" class="fline" style="stroke:${C[id]}"/><path d="${d}" class="fdash" id="fd-${id}" style="stroke:${C[id]}"/>`).join('') +
+      LINKS.map(([id, d]) => `<path d="${d}" class="fline" id="fl-${id}l" style="stroke:${C[id]}"/><path d="${d}" class="fdash" id="fd-${id}" style="stroke:${C[id]}"/>`).join('') +
       // PV header + box
       // PV: two-line box — watts now, today's kWh under it; voltage to the right
       `<rect id="fb-pv" x="208" y="58" width="84" height="44" rx="8" class="fbox" style="stroke:${C.pv}"/>` +
@@ -61,6 +61,7 @@
       T('fb-kwh', 284, 352, 'fs', 'start') + T('fb-soc', 284, 380, 'fsoc', 'start') +
       T('fb-eta1', 284, 398, 'flab', 'start') + T('fb-eta2', 284, 416, 'fs', 'start');
     built = true;
+    loadColor = null;
   }
 
   const set = (id, s) => { const e = document.getElementById(id); if (e && e.textContent !== s) e.textContent = s; };
@@ -119,8 +120,17 @@
     set('fo-3', v('inverter', 'load_pct') !== undefined ? num(v('inverter', 'load_pct'), 0) + ' %' : '');
     set('fi-temp', v('inverter', 'temp') !== undefined ? num(v('inverter', 'temp'), 0) + '°' : '');
     document.getElementById('fi-dot').classList.toggle('bad', !fresh('inverter'));
-    // load
+    // load — coloured by what feeds the house most right now
     set('fv-load', W(p.load));
+    const fed = { grid: p.grid, batt: Math.max(0, -p.batt) };
+    fed.pv = Math.max(0, p.load - fed.grid - fed.batt);
+    const src = p.load > 5 ? Object.entries(fed).sort((a, b) => b[1] - a[1])[0][0] : null;
+    const lc = src ? C[src] : C.load;
+    if (lc !== loadColor) {
+      loadColor = lc;
+      for (const id of ['fl-loadl', 'fd-load', 'fb-load', 'fi-load']) document.getElementById(id).style.stroke = lc;
+    }
+    document.getElementById('fi-load').setAttribute('data-src', src || '');
     set('fe-load', kwh(E.load));
     // battery
     const soc = v('bms', 'soc'), a = v('bms', 'bms_a'), cap = v('bms', 'cap_ah'), bv = v('bms', 'bms_v') ?? v('inverter', 'batt_v');
