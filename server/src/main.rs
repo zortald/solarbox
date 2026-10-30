@@ -7,6 +7,7 @@
 
 mod automations;
 mod boards;
+mod changes;
 mod config;
 mod db;
 mod discovery;
@@ -430,8 +431,15 @@ async fn autom_put(State(st): State<AppState>, h: HeaderMap, body: String) -> Re
     if !admin_header(&st, &h) {
         return (StatusCode::UNAUTHORIZED, Json(serde_json::json!({ "ok": false, "error": "admin password required" }))).into_response();
     }
+    let before = st.autom.rules();
     match st.autom.save(&body) {
-        Ok(n) => Json(serde_json::json!({ "ok": true, "rules": n })).into_response(),
+        Ok(n) => {
+            let diff = changes::rules_diff(&before, &st.autom.rules());
+            if !diff.is_empty() {
+                changes::notify(&st, format!("Автоматизации:\n{diff}"), changes::By::Dashboard);
+            }
+            Json(serde_json::json!({ "ok": true, "rules": n })).into_response()
+        }
         Err(e) => (StatusCode::BAD_REQUEST, Json(serde_json::json!({ "ok": false, "error": e }))).into_response(),
     }
 }
@@ -464,6 +472,7 @@ async fn tg_get(State(st): State<AppState>, h: HeaderMap) -> Response {
     Json(serde_json::json!({
         "token_set": t.is_some(),
         "bot": t.as_ref().and_then(|t| t.bot.clone()),
+        "notify_changes": t.as_ref().map(|t| t.notify_changes).unwrap_or(true),
         "chats": t.map(|t| t.chats).unwrap_or_default(),
         "pending": st.tg.pending(),
     }))
@@ -471,7 +480,7 @@ async fn tg_get(State(st): State<AppState>, h: HeaderMap) -> Response {
 }
 
 #[derive(Deserialize)]
-struct TgBody { token: Option<String>, #[serde(default)] disable: bool }
+struct TgBody { token: Option<String>, #[serde(default)] disable: bool, notify_changes: Option<bool> }
 
 /// Save a bot token (validated via getMe, command menu registered), or
 /// `{"disable": true}` to forget everything.
@@ -480,6 +489,21 @@ async fn tg_put(State(st): State<AppState>, h: HeaderMap, Json(b): Json<TgBody>)
     if b.disable {
         return match st.tg.set(None) {
             Ok(_) => Json(serde_json::json!({ "ok": true })).into_response(),
+            Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({ "ok": false, "error": e }))).into_response(),
+        };
+    }
+    if let (Some(on), None) = (b.notify_changes, &b.token) {
+        let Some(mut t) = st.tg.get() else {
+            return (StatusCode::BAD_REQUEST, Json(serde_json::json!({ "ok": false, "error": "сначала токен бота" }))).into_response();
+        };
+        // Announce switching off while it is still on, switching on once it is.
+        if !on { changes::notify(&st, "Уведомления об изменениях настроек выключены".into(), changes::By::Dashboard); }
+        t.notify_changes = on;
+        return match st.tg.set(Some(t)) {
+            Ok(_) => {
+                if on { changes::notify(&st, "Уведомления об изменениях настроек включены".into(), changes::By::Dashboard); }
+                Json(serde_json::json!({ "ok": true })).into_response()
+            }
             Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({ "ok": false, "error": e }))).into_response(),
         };
     }
@@ -492,13 +516,17 @@ async fn tg_put(State(st): State<AppState>, h: HeaderMap, Json(b): Json<TgBody>)
         Ok(Err(e)) => return (StatusCode::BAD_REQUEST, Json(serde_json::json!({ "ok": false, "error": format!("токен не подошёл: {e}") }))).into_response(),
         Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({ "ok": false, "error": e.to_string() }))).into_response(),
     };
-    let chats = st.tg.get().map(|t| t.chats).unwrap_or_default();
+    let prev = st.tg.get();
     let mut tg = telegram::Tg::default();
     tg.token = token;
-    tg.chats = chats;
+    tg.chats = prev.as_ref().map(|t| t.chats.clone()).unwrap_or_default();
+    tg.notify_changes = prev.as_ref().map(|t| t.notify_changes).unwrap_or(true);
     tg.bot = Some(bot.clone());
     match st.tg.set(Some(tg)) {
-        Ok(_) => Json(serde_json::json!({ "ok": true, "bot": bot })).into_response(),
+        Ok(_) => {
+            changes::notify(&st, format!("Telegram: подключён бот @{bot}"), changes::By::Dashboard);
+            Json(serde_json::json!({ "ok": true, "bot": bot })).into_response()
+        }
         Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({ "ok": false, "error": e }))).into_response(),
     }
 }
@@ -526,7 +554,11 @@ async fn tg_chat_add(State(st): State<AppState>, h: HeaderMap, Json(b): Json<Cha
     };
     t.chats.push(chat.clone());
     match st.tg.set(Some(t)) {
-        Ok(_) => Json(serde_json::json!({ "ok": true, "chat": chat })).into_response(),
+        Ok(_) => {
+            let who = if chat.name.is_empty() { chat.id.clone() } else { chat.name.clone() };
+            changes::notify(&st, format!("Telegram: добавлен получатель {who}"), changes::By::Dashboard);
+            Json(serde_json::json!({ "ok": true, "chat": chat })).into_response()
+        }
         Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({ "ok": false, "error": e }))).into_response(),
     }
 }
@@ -534,6 +566,11 @@ async fn tg_chat_add(State(st): State<AppState>, h: HeaderMap, Json(b): Json<Cha
 async fn tg_chat_del(State(st): State<AppState>, Path(id): Path<String>, h: HeaderMap) -> Response {
     if !admin_header(&st, &h) { return need_admin(); }
     let Some(mut t) = st.tg.get() else { return Json(serde_json::json!({ "ok": true })).into_response() };
+    if let Some(c) = t.chats.iter().find(|c| c.id == id) {
+        // Sent before removal, so the person being removed sees it too.
+        let who = if c.name.is_empty() { c.id.clone() } else { c.name.clone() };
+        changes::notify(&st, format!("Telegram: удалён получатель {who}"), changes::By::Dashboard);
+    }
     t.chats.retain(|c| c.id != id);
     match st.tg.set(Some(t)) {
         Ok(_) => Json(serde_json::json!({ "ok": true })).into_response(),
@@ -554,7 +591,10 @@ async fn outages_import(State(st): State<AppState>, h: HeaderMap, Json(items): J
     if !admin_header(&st, &h) { return need_admin(); }
     let r = { let c = st.db.lock().unwrap(); outages::import(&c, &items) };
     match r {
-        Ok(n) => Json(serde_json::json!({ "ok": true, "added": n })).into_response(),
+        Ok(n) => {
+            if n > 0 { changes::notify(&st, format!("Отключения света: добавлено {n} из журнала платы"), changes::By::Dashboard); }
+            Json(serde_json::json!({ "ok": true, "added": n })).into_response()
+        }
         Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({ "ok": false, "error": e.to_string() }))).into_response(),
     }
 }
@@ -564,7 +604,15 @@ async fn outages_delete(State(st): State<AppState>, Path(start): Path<i64>, h: H
     if !admin_header(&st, &h) { return need_admin(); }
     let r = { let c = st.db.lock().unwrap(); st.outages.delete(&c, start) };
     match r {
-        Ok(n) => Json(serde_json::json!({ "ok": true, "deleted": n })).into_response(),
+        Ok(n) => {
+            if n > 0 {
+                let tz = st.config.get().timezone;
+                let l = tz.local(start);
+                let when = format!("{} {:02}:{:02}", tz.day(start), l.rem_euclid(86_400) / 3600, l.rem_euclid(3600) / 60);
+                changes::notify(&st, format!("Отключения света: удалена запись от {when}"), changes::By::Dashboard);
+            }
+            Json(serde_json::json!({ "ok": true, "deleted": n })).into_response()
+        }
         Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({ "ok": false, "error": e.to_string() }))).into_response(),
     }
 }

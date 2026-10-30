@@ -66,6 +66,8 @@
       <div class="row"><input type="password" id="tg-token" placeholder="${t.token_set ? 'новый токен (оставь пустым — не менять)' : 'токен от @BotFather, 123456:ABC…'}" autocomplete="off">
         <button class="btn on" id="tg-save">${t.token_set ? 'Сменить токен' : 'Подключить'}</button></div>
       ${t.token_set ? `
+      <label class="chk"><input type="checkbox" id="tg-notify"${t.notify_changes ? ' checked' : ''}> Сообщать об изменениях настроек
+        <span class="muted small">— инвертор, BMS, прошивки плат, автоматизации, конфигурация, получатели</span></label>
       <h3>Получатели</h3>
       ${t.chats.length ? t.chats.map((c) => `<div class="frow"><span>${who(c)}</span><span></span><button class="btn xs" data-tdel="${esc(c.id)}">✕</button></div>`).join('')
         : '<p class="muted small">Пока никого. Напиши своему боту <code>/start</code> — появишься ниже в «Хотят доступ».</p>'}
@@ -80,6 +82,10 @@
       catch (e) { toast(e.message, true); }
     };
     if (!t.token_set) return;
+    $('#tg-notify').onchange = async (e) => {
+      try { await api('/api/telegram', { method: 'PUT', json: { notify_changes: e.target.checked } }); toast(e.target.checked ? 'Изменения будут приходить в Telegram' : 'Изменения больше не присылаются'); }
+      catch (err) { e.target.checked = !e.target.checked; toast(err.message, true); }
+    };
     const add = async (id) => { try { await api('/api/telegram/chats', { method: 'POST', json: { id } }); toast('Добавлен'); tg(); } catch (e) { toast(e.message, true); } };
     el.querySelectorAll('[data-tadd]').forEach((b) => (b.onclick = () => add(b.dataset.tadd)));
     $('#tg-add').onclick = () => { const id = $('#tg-chat').value.trim(); if (id) add(id); };

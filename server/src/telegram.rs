@@ -26,9 +26,16 @@ pub struct Tg {
     pub chats: Vec<Chat>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub bot: Option<String>,
+    /// Mirror every settings change to the chats (on unless switched off).
+    #[serde(default = "yes")]
+    pub notify_changes: bool,
     /// Legacy single-chat field (migrated into `chats` on load).
     #[serde(default, skip_serializing)]
     chat_id: Option<String>,
+}
+
+fn yes() -> bool {
+    true
 }
 
 #[derive(Default, Serialize, Deserialize)]

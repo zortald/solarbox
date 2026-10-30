@@ -244,3 +244,5 @@ nav a { color: var(--muted); } nav a.on { color: var(--fg); }
 .stab th { font-weight: 600; border-top: 0; }
 .stab tr.tot td { font-weight: 700; }
 #st-tip { min-height: 18px; margin-top: 4px; }
+.chk { display: flex; flex-wrap: wrap; gap: 4px 8px; align-items: baseline; margin: 10px 0 4px; cursor: pointer; }
+.chk input { margin: 0; }

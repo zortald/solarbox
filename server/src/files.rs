@@ -108,7 +108,11 @@ pub async fn get_config(State(st): State<AppState>) -> Response {
 pub async fn put_config(State(st): State<AppState>, h: HeaderMap, body: String) -> Response {
     if !admin_ok(&st, &h) { return deny(&st); }
     match st.config.save(&body) {
-        Ok(_) => { eprintln!("[config] replaced via API"); Json(serde_json::json!({ "ok": true })).into_response() }
+        Ok(_) => {
+            eprintln!("[config] replaced via API");
+            crate::changes::notify(&st, "Конфигурация (config.json) изменена".into(), crate::changes::By::Dashboard);
+            Json(serde_json::json!({ "ok": true })).into_response()
+        }
         Err(e) => bad(StatusCode::BAD_REQUEST, e),
     }
 }

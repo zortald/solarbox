@@ -255,7 +255,11 @@ pub async fn action(
     }
     eprintln!("[control] {name}: POST {path}");
     match http(b, "POST", &path).await {
-        Ok((code, _)) if code < 300 => Json(serde_json::json!({ "ok": true })).into_response(),
+        Ok((code, _)) if code < 300 => {
+            let text = crate::changes::describe_action(&st, &name, domain, ent, &a.action, a.value.as_deref());
+            crate::changes::notify(&st, text, crate::changes::By::Dashboard);
+            Json(serde_json::json!({ "ok": true })).into_response()
+        }
         Ok((code, body)) => err(StatusCode::BAD_GATEWAY, format!("board answered HTTP {code}: {}", body.trim())),
         Err(e) => err(StatusCode::BAD_GATEWAY, e),
     }
@@ -281,6 +285,9 @@ pub async fn flash(
     match res {
         Ok(msg) => {
             eprintln!("[ota] {name}: {msg}");
+            let cfg = st.config.get();
+            let title = cfg.board(&name).and_then(|c| c.ui.get("title")).and_then(|t| t.as_str()).unwrap_or(&name).to_string();
+            crate::changes::notify(&st, format!("{title}: прошивка обновлена по воздуху ({} КБ)", image.len() / 1024), crate::changes::By::Dashboard);
             Json(serde_json::json!({ "ok": true, "message": msg })).into_response()
         }
         Err(e) => {

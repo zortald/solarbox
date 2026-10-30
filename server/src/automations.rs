@@ -258,6 +258,9 @@ impl Engine {
         self.inner.lock().unwrap().values.get(&(device.to_string(), metric.to_string())).map(|(v, _)| *v)
     }
 
+    pub fn rules(&self) -> Vec<Rule> {
+        self.inner.lock().unwrap().rules.clone()
+    }
     pub fn rule(&self, id: &str) -> Option<Rule> {
         self.inner.lock().unwrap().rules.iter().find(|r| r.id == id).cloned()
     }
@@ -411,7 +414,11 @@ pub async fn execute(st: AppState, rule: Rule, clear: bool) {
                 }
                 let what = format!("{board}: {action} {ent}{}", a.value.as_deref().map(|v| format!(" = {v}")).unwrap_or_default());
                 match boards::http(&b, "POST", &url).await {
-                    Ok((c, _)) if c < 300 => st.autom.log(&rule.name, format!("✔ {what}")),
+                    Ok((c, _)) if c < 300 => {
+                        st.autom.log(&rule.name, format!("✔ {what}"));
+                        let text = crate::changes::describe_action(&st, board, domain, ent, action, a.value.as_deref());
+                        crate::changes::notify(&st, text, crate::changes::By::Automation(&rule.name));
+                    }
                     Ok((c, body)) => st.autom.log(&rule.name, format!("✘ {what}: HTTP {c} {}", body.trim())),
                     Err(e) => st.autom.log(&rule.name, format!("✘ {what}: {e}")),
                 }
