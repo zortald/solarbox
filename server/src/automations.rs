@@ -99,6 +99,8 @@ struct Inner {
     values: HashMap<(String, String), (f64, i64)>,
     mtime: Option<SystemTime>,
     load_error: Option<String>,
+    /// Fired/last_fired changed since the last save to the database.
+    dirty: bool,
 }
 
 pub struct Engine {
@@ -157,7 +159,7 @@ impl Engine {
         }
         let e = Engine {
             path,
-            inner: Mutex::new(Inner { rules: vec![], state: HashMap::new(), values: HashMap::new(), mtime: None, load_error: None }),
+            inner: Mutex::new(Inner { rules: vec![], state: HashMap::new(), values: HashMap::new(), mtime: None, load_error: None, dirty: false }),
             log: Mutex::new(VecDeque::new()),
             db: Mutex::new(None),
         };
@@ -204,12 +206,75 @@ impl Engine {
     /// Keep the journal in the database from now on.
     pub fn attach_db(&self, db: std::sync::Arc<Mutex<rusqlite::Connection>>) {
         if let Err(e) = db.lock().unwrap().execute_batch(
-            "CREATE TABLE IF NOT EXISTS auto_log(id INTEGER PRIMARY KEY, ts INTEGER NOT NULL, rule TEXT NOT NULL, msg TEXT NOT NULL);",
+            "CREATE TABLE IF NOT EXISTS auto_log(id INTEGER PRIMARY KEY, ts INTEGER NOT NULL, rule TEXT NOT NULL, msg TEXT NOT NULL);
+             CREATE TABLE IF NOT EXISTS auto_state(id TEXT PRIMARY KEY, fired INTEGER NOT NULL, last_fired INTEGER);",
         ) {
             eprintln!("[auto] journal table: {e}");
             return;
         }
+        // Restore which rules already fired, so a restart during e.g. an
+        // outage doesn't announce the same outage again.
+        let mut saved: Vec<(String, bool, Option<i64>)> = {
+            let c = db.lock().unwrap();
+            c.prepare("SELECT id, fired, last_fired FROM auto_state")
+                .and_then(|mut st| st.query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?.collect())
+                .unwrap_or_default()
+        };
+        if saved.is_empty() {
+            // First run with this table: take it from the journal — a rule whose
+            // latest entry is «сработало» (not cleared since) has fired.
+            let rules = self.inner.lock().unwrap().rules.clone();
+            let c = db.lock().unwrap();
+            for r in rules.iter().filter(|r| r.when.op != "changed") {
+                let last: Option<(i64, String)> = c
+                    .query_row(
+                        "SELECT ts, msg FROM auto_log WHERE rule = ?1 AND (msg = 'сработало' OR msg LIKE 'условие снято%')
+                         ORDER BY id DESC LIMIT 1",
+                        [&r.name],
+                        |row| Ok((row.get(0)?, row.get(1)?)),
+                    )
+                    .ok();
+                if let Some((ts, msg)) = last {
+                    saved.push((r.id.clone(), msg == "сработало", Some(ts)));
+                }
+            }
+        }
+        {
+            let mut g = self.inner.lock().unwrap();
+            for (id, fired, last) in saved {
+                let st = g.state.entry(id).or_default();
+                st.fired = fired;
+                st.active = fired;
+                st.last_fired = last;
+            }
+        }
         *self.db.lock().unwrap() = Some(db);
+    }
+
+    /// Save fired state if it changed. Called from the 1 s tick loop, never
+    /// while the database lock is held by ingest.
+    fn persist_state(&self) {
+        let rows: Vec<(String, bool, Option<i64>)> = {
+            let mut g = self.inner.lock().unwrap();
+            if !g.dirty {
+                return;
+            }
+            g.dirty = false;
+            g.state.iter().map(|(id, s)| (id.clone(), s.fired, s.last_fired)).collect()
+        };
+        if let Some(db) = self.db.lock().unwrap().as_ref() {
+            let c = db.lock().unwrap();
+            let r = c.execute("DELETE FROM auto_state", []).and_then(|_| {
+                let mut ins = c.prepare_cached("INSERT INTO auto_state(id, fired, last_fired) VALUES(?1, ?2, ?3)")?;
+                for (id, fired, last) in &rows {
+                    ins.execute(rusqlite::params![id, fired, last])?;
+                }
+                Ok(())
+            });
+            if let Err(e) = r {
+                eprintln!("[auto] state: {e}");
+            }
+        }
     }
 
     pub fn log(&self, rule: &str, msg: impl Into<String>) {
@@ -295,7 +360,10 @@ impl Engine {
         for (m, v) in [("minute", minute), ("hour", minute / 60), ("weekday", tz.weekday(now))] {
             g.values.insert(("clock".to_string(), m.to_string()), (v as f64, now));
         }
-        evaluate(&mut g, None)
+        let out = evaluate(&mut g, None);
+        drop(g);
+        self.persist_state();
+        out
     }
 }
 
@@ -332,13 +400,24 @@ fn holds(values: &HashMap<(String, String), (f64, i64)>, c: &Cond, now: i64) -> 
     }
 }
 
+/// Is there a value to judge `c` by? «stale» is about missing data itself.
+fn known(values: &HashMap<(String, String), (f64, i64)>, c: &Cond) -> bool {
+    c.op == "stale" || c.op == "changed" || values.contains_key(&(c.device.clone(), c.metric.clone()))
+}
+
 /// Returns (rule, is_clear) pairs to execute.
 fn evaluate(g: &mut Inner, packet: Option<(&str, &Vec<String>)>) -> Vec<(Rule, bool)> {
     let now = Instant::now();
     let nts = now_ts();
     let mut out = Vec::new();
+    let mut dirty = false;
     let rules = g.rules.clone();
     for r in rules.iter().filter(|r| r.enabled) {
+        // No value yet (e.g. right after a restart, before the first packet):
+        // neither fire nor clear — keep the state as it was.
+        if !known(&g.values, &r.when) || !r.and.iter().all(|c| known(&g.values, c)) {
+            continue;
+        }
         let others_ok = r.and.iter().all(|c| holds(&g.values, c, nts));
         let st = g.state.entry(r.id.clone()).or_default();
         let cooled = st.last_fire_at.map(|t| now.duration_since(t) >= Duration::from_secs(r.cooldown_s)).unwrap_or(true);
@@ -349,6 +428,7 @@ fn evaluate(g: &mut Inner, packet: Option<(&str, &Vec<String>)>) -> Vec<(Rule, b
                 st.last_fire_at = Some(now);
                 st.last_fired = Some(nts);
                 out.push((r.clone(), false));
+                dirty = true;
             }
             continue;
         }
@@ -362,18 +442,21 @@ fn evaluate(g: &mut Inner, packet: Option<(&str, &Vec<String>)>) -> Vec<(Rule, b
                 st.last_fire_at = Some(now);
                 st.last_fired = Some(nts);
                 out.push((r.clone(), false));
+                dirty = true;
             }
         } else {
             st.since = None;
             st.active = false;
             if st.fired {
                 st.fired = false;
+                dirty = true;
                 if !r.on_clear.is_empty() {
                     out.push((r.clone(), true));
                 }
             }
         }
     }
+    g.dirty |= dirty;
     out
 }
 
@@ -442,7 +525,7 @@ mod tests {
         }
     }
     fn inner(rules: Vec<Rule>) -> Inner {
-        Inner { rules, state: HashMap::new(), values: HashMap::new(), mtime: None, load_error: None }
+        Inner { rules, state: HashMap::new(), values: HashMap::new(), mtime: None, load_error: None, dirty: false }
     }
     fn feed(g: &mut Inner, v: f64) -> Vec<(Rule, bool)> {
         g.values.insert(("inverter".into(), "grid_v".into()), (v, now_ts()));
@@ -460,6 +543,26 @@ mod tests {
         let c = feed(&mut g, 231.0);
         assert_eq!(c.len(), 1);
         assert!(c[0].1, "on_clear when condition stops");
+    }
+
+    #[test]
+    fn restored_fired_state_does_not_refire() {
+        // as after a restart during an outage: state says it already fired
+        let mut g = inner(vec![rule("<", 150.0, 0)]);
+        g.state.insert("r".into(), RuleState { fired: true, active: true, ..Default::default() });
+        assert!(feed(&mut g, 0.0).is_empty(), "same outage must not be announced again");
+        assert!(!g.dirty);
+        let out = feed(&mut g, 230.0);
+        assert_eq!(out.len(), 1, "grid back → on_clear still runs");
+        assert!(out[0].1 && g.dirty);
+    }
+
+    #[test]
+    fn no_data_yet_keeps_state() {
+        let mut g = inner(vec![rule("<", 150.0, 0)]);
+        g.state.insert("r".into(), RuleState { fired: true, active: true, ..Default::default() });
+        assert!(evaluate(&mut g, None).is_empty(), "no grid_v yet → no false «grid back»");
+        assert!(g.state["r"].fired);
     }
 
     #[test]
