@@ -51,7 +51,7 @@
       T('fi-temp', 250, 234, 'fsm') +
       T('fo-1', 292, 160, 'fs', 'start') + T('fo-2', 292, 174, 'fs', 'start') + T('fo-3', 292, 188, 'fs', 'start') +
       // load
-      box('load', 308, 189, C.load) + ICON.load(426, 178) + T('fl-mix', 300, 290, 'fs', 'start') +
+      box('load', 308, 189, C.load) + ICON.load(426, 178) +
       T('fl-load', 350, 242, 'flab', 'middle', 'Потребление сегодня') + T('fe-load', 350, 264, 'fe') +
       // battery
       box('batt', 208, 278, C.batt) +
@@ -86,7 +86,6 @@
     return [`ВРЕМЯ ДО ${toward} @${hh}:${mm}`, (d ? d + ' д ' : '') + (d || h ? h + ' ч ' : '') + m + ' мин'];
   }
 
-  const SRC_NAME = { pv: 'солнце', grid: 'сеть', batt: 'АКБ' };
   function houseColours(p) {
     const fed = { grid: p.grid, batt: Math.max(0, -p.batt) };
     fed.pv = Math.max(0, p.load - fed.grid - fed.batt);
@@ -104,7 +103,6 @@
     if (parts.length <= 1) {
       const c = parts.length ? C[parts[0][0]] : C.load;
       for (const id of [...ids.obj, ...ids.line]) document.getElementById(id).style.stroke = c;
-      document.getElementById('fl-mix').textContent = '';
       return;
     }
     let at = 0, stops = '';
@@ -116,7 +114,6 @@
     document.getElementById('gl-line').innerHTML = stops;
     for (const id of ids.obj) document.getElementById(id).style.stroke = 'url(#gl-obj)';
     for (const id of ids.line) document.getElementById(id).style.stroke = 'url(#gl-line)';
-    document.getElementById('fl-mix').innerHTML = parts.map(([k, f]) => `<tspan style="fill:${C[k]}">${SRC_NAME[k]} ${Math.round(f * 100)}%</tspan>`).join(' · ');
   }
 
   function power() {
