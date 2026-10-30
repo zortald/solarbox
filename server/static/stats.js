@@ -120,19 +120,18 @@
     const sum = (k) => days.reduce((a, d) => a + (d[k] || 0), 0);
     const ext = (k, fn) => { const v = days.map((d) => d[k]).filter((x) => x !== undefined); return v.length ? fn(...v) : undefined; };
     const offSecs = outs.reduce((a, o) => a + (o.to - o.from), 0);
-    const avg = (k) => (nDays > 1 && days.length ? ` · ≈${fmt(sum(k) / days.length)} в день` : '');
+    const avg = (k) => (nDays > 1 && days.length ? ` · ≈${fmt(sum(k) / days.length)}/день` : '');
     $('#sd-facts').innerHTML = [
       ['Солнце', `${fmt(sum('pv'))} кВт·ч`, `пик ${fmt(ext('pv_max', Math.max), 0)} Вт${avg('pv')}`],
       ['Дом', `${fmt(sum('load'))} кВт·ч`, `пик ${fmt(ext('load_max', Math.max), 0)} Вт${avg('load')}`],
       ['Сеть ≈', `${fmt(sum('grid'))} кВт·ч`, avg('grid').replace(' · ', '')],
       ['АКБ', `+${fmt(sum('chg'))} / −${fmt(sum('dis'))} кВт·ч`, `заряд ${fmt(ext('soc_min', Math.min), 0)}–${fmt(ext('soc_max', Math.max), 0)} %`],
-      ...(hasTariff ? [['Деньги за сеть', `≈ ${money(sum('cost'))}`, `сэкономлено ≈ ${money(sum('saved'))}${nDays > 1 && days.length ? ` · ≈${money(sum('cost') / days.length)} в день` : ''}`]] : []),
-      ...(hasTariff && days.some((d) => d.cost_night !== undefined) ? [
-        ['Днём', `≈ ${money(sum('cost') - sum('cost_night'))}`, `${fmt(sum('grid_day'))} кВт·ч из сети`],
-        ['Ночью', `≈ ${money(sum('cost_night'))}`, `${fmt(sum('grid_night'))} кВт·ч из сети`],
-      ] : []),
-      ['Без света', outs.length ? span(offSecs) : 'не было', outs.length ? `${outs.length} раз` + (outs.length > 1 ? ` · самое долгое ${span(Math.max(...outs.map((o) => o.to - o.from)))}` : '') : ''],
-    ].map(([l, v, sub]) => `<div><span>${l}</span><b>${v}</b>${sub ? `<small>${sub}</small>` : ''}</div>`).join('');
+      ...(hasTariff ? [['Деньги за сеть', `≈ ${money(sum('cost'))}`,
+        (days.some((d) => d.cost_night !== undefined)
+          ? `день ${money(sum('cost') - sum('cost_night'))} · ${fmt(sum('grid_day'))} кВт·ч &nbsp;|&nbsp; ночь ${money(sum('cost_night'))} · ${fmt(sum('grid_night'))} кВт·ч<br>`
+          : '') + `сэкономлено ≈ ${money(sum('saved'))}${nDays > 1 && days.length ? ` · ≈${money(sum('cost') / days.length)}/день` : ''}`]] : []),
+      ['Без света', outs.length ? span(offSecs) : 'не было', outs.length ? `${outs.length} раз` + (outs.length > 1 ? ` · макс. ${span(Math.max(...outs.map((o) => o.to - o.from)))}` : '') : ''],
+    ].map(([l, v, sub]) => `<div${l.startsWith('Деньги') ? ' class="w2"' : ''}><span>${l}</span><b>${v}</b>${sub ? `<small>${sub}</small>` : ''}</div>`).join('');
     const long = nDays > 1, MAXROWS = 30;
     const when = (t) => { const d = new Date(t * 1000); return (long ? `${d.getDate()}.${p2(d.getMonth() + 1)} ` : '') + hm(t); };
     $('#sd-out').innerHTML = outs.length ? '<h3>Отключения</h3><table class="olist">' + outs.slice(0, MAXROWS).map((o) =>
@@ -215,7 +214,7 @@
     $('#st-table').innerHTML = R.length ? `<table class="stab"><tr><th></th>${SER.map((s) => `<th style="color:${s.color}">${s.label}</th>`).join('')}${mh}</tr>
       <tr class="tot"><td>Итого</td>${SER.map((s) => `<td>${f(tot[s.k])}</td>`).join('')}${mc(tot)}</tr>
       ${R.map((r) => `<tr${r.day.length === 10 ? ` class="link${range === 'day' && r.day === day ? ' sel' : ''}" data-day="${r.day}"` : ` class="link" data-month="${r.day}"`}><td>${r.label}</td>${SER.map((s) => `<td>${f(r[s.k])}</td>`).join('')}${mc(r)}</tr>`).join('')}</table>
-      <p class="muted small">кВт·ч. Считается на сервере по каждому пакету от плат (раз в 5 с). «Сеть ≈» — оценка по балансу: инвертор не измеряет мощность сети${hasTariff ? `, поэтому и деньги — оценка (${cur} считаются по тарифу на каждый час)` : ''}. Нажми на строку, чтобы открыть ${range === '12m' ? 'месяц' : 'день'}.</p>`
+      <p class="muted small">кВт·ч${hasTariff ? `, ${cur} по тарифу каждого часа` : ''}. «Сеть ≈» — оценка по балансу (инвертор не меряет сеть). Строка открывает ${range === '12m' ? 'месяц' : 'день'}.</p>`
       : '<div class="empty">Пока нет данных за этот период.</div>';
     document.querySelectorAll('#st-table [data-day]').forEach((tr) => (tr.onclick = () => openDay(tr.dataset.day)));
     document.querySelectorAll('#st-table [data-month]').forEach((tr) => (tr.onclick = () => openMonth(tr.dataset.month)));

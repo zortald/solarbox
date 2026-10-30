@@ -92,22 +92,26 @@
     </section>
     <section data-page="stats" id="page-stats" hidden>
       <div class="panel">
-        <div class="ph"><h2 id="st-title">Энергия по дням</h2><div class="row" id="st-ranges"></div></div>
-        <div class="row" id="sd-nav" hidden>
-          <button class="btn" id="sd-prev" title="Предыдущий день">‹</button>
-          <input type="date" id="sd-date">
-          <button class="btn" id="sd-next" title="Следующий день">›</button>
-          <button class="btn" id="sd-today">Сегодня</button>
-        </div>
-        <div class="row" id="sm-nav" hidden>
-          <button class="btn" id="sm-prev" title="Предыдущий месяц">‹</button>
-          <input type="month" id="sm-month">
-          <button class="btn" id="sm-next" title="Следующий месяц">›</button>
-          <button class="btn" id="sm-this">Этот месяц</button>
+        <div class="ph">
+          <div class="row stnav"><h2 id="st-title">Энергия по дням</h2>
+            <span class="row" id="sd-nav" hidden>
+              <button class="btn" id="sd-prev" title="Предыдущий день">‹</button>
+              <input type="date" id="sd-date">
+              <button class="btn" id="sd-next" title="Следующий день">›</button>
+              <button class="btn" id="sd-today">Сегодня</button>
+            </span>
+            <span class="row" id="sm-nav" hidden>
+              <button class="btn" id="sm-prev" title="Предыдущий месяц">‹</button>
+              <input type="month" id="sm-month">
+              <button class="btn" id="sm-next" title="Следующий месяц">›</button>
+              <button class="btn" id="sm-this">Этот</button>
+            </span>
+          </div>
+          <div class="row" id="st-ranges"></div>
         </div>
         <div class="facts" id="sd-facts"></div>
         <div class="legend toggles" id="st-legend"></div>
-        <canvas id="st-chart" class="xtall"></canvas>
+        <canvas id="st-chart"></canvas>
         <div class="small" id="st-tip">&nbsp;</div>
         <div id="sd-out"></div>
       </div>

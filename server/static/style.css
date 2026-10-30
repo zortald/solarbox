@@ -258,3 +258,23 @@ input[type=date], input[type=month] { color-scheme: dark; }
 .ttab td { padding: 4px 6px 4px 0; }
 .ttab input[type=number] { width: 80px; }
 #set-money label input { margin-left: 6px; }
+/* statistics: compact */
+#page-stats .panel { padding: 10px 12px; }
+#page-stats .ph { margin-bottom: 4px; }
+#page-stats .stnav { gap: 6px; align-items: center; flex-wrap: wrap; }
+#page-stats .stnav h2 { margin: 0 4px 0 0; }
+#page-stats .stnav .row { gap: 4px; margin: 0; }
+#page-stats .ph .btn, #page-stats .stnav .btn { padding: 3px 8px; font-size: 12px; }
+#page-stats .stnav input { padding: 3px 6px; font-size: 12px; }
+#sd-facts { grid-template-columns: repeat(auto-fill, minmax(128px, 1fr)); gap: 4px 12px; margin: 2px 0 6px; }
+#sd-facts b { font-size: 14px; }
+#sd-facts small, #sd-facts span { font-size: 10.5px; line-height: 1.3; }
+#page-stats .legend { margin: 0 0 2px; font-size: 12px; }
+#st-chart { height: 200px; }
+#st-tip { min-height: 16px; font-size: 11.5px; }
+#sd-out h3 { margin: 6px 0 2px; font-size: 12px; }
+#page-stats .olist td { padding: 2px 4px; }
+#page-stats .stab { font-size: 12px; }
+#page-stats .stab th, #page-stats .stab td { padding: 3px 5px; }
+#page-stats .stab + p { margin: 6px 0 0; font-size: 11px; }
+#sd-facts .w2 { grid-column: span 2; }
