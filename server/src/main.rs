@@ -12,6 +12,7 @@ mod config;
 mod db;
 mod discovery;
 mod energy;
+mod money;
 mod files;
 mod ota;
 mod outages;
@@ -135,6 +136,12 @@ async fn main() {
             Ok(n) if n > 0 => eprintln!("[energy] rebuilt daily totals from history ({n} steps)"),
             Ok(_) => {}
             Err(e) => eprintln!("[energy] backfill: {e}"),
+        }
+        // after the daily rebuild, which fills the hourly table itself on a fresh install
+        match energy::backfill_hourly(&c, &tz) {
+            Ok(n) if n > 0 => eprintln!("[energy] rebuilt hourly grid/load from history ({n} steps)"),
+            Ok(_) => {}
+            Err(e) => eprintln!("[energy] backfill hourly: {e}"),
         }
         let today = energy::day_totals(&c, &tz.day(now()));
         for k in energy::KEYS {

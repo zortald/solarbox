@@ -147,7 +147,7 @@ details summary { cursor: pointer; color: var(--muted); }
 .ah { display: flex; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
 .aedit { display: grid; gap: 8px; }
 .aedit label { display: grid; gap: 4px; font-size: 13px; }
-.aedit input, .aedit textarea, .aedit select, .arow input, #set-tg input { background: var(--bg); color: var(--fg); border: 1px solid var(--line); border-radius: 8px; padding: 6px 8px; font: inherit; font-size: 13px; }
+.aedit input, .aedit textarea, .aedit select, .arow input, #set-tg input:not([type=checkbox]), #m-cur { background: var(--bg); color: var(--fg); border: 1px solid var(--line); border-radius: 8px; padding: 6px 8px; font: inherit; font-size: 13px; }
 .crow, .arow { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; padding: 6px; background: var(--panel2); border-radius: 8px; }
 .crow input[type=number] { width: 90px; }
 .arow textarea { flex: 1 1 100%; resize: vertical; }
@@ -155,7 +155,7 @@ details summary { cursor: pointer; color: var(--muted); }
 .arow label input { width: 70px; }
 .lrow { display: grid; grid-template-columns: 150px 180px 1fr; gap: 10px; font-size: 12px; padding: 4px 0; border-top: 1px solid var(--line); }
 @media (max-width: 600px) { .lrow { grid-template-columns: 1fr; gap: 0; } }
-#set-tg .row { margin-top: 6px; } #set-tg input { min-width: 220px; }
+#set-tg .row { margin-top: 6px; } #set-tg input:not([type=checkbox]) { min-width: 220px; }
 
 .fcgrid .chart { background: var(--panel2); }
 
@@ -254,3 +254,7 @@ input[type=date], input[type=month] { color-scheme: dark; }
 .stab tr.sel td { background: rgba(78,163,255,.16); }
 #sd-nav { margin: 2px 0 8px; }
 #sm-nav { margin: 2px 0 8px; }
+.ttab { width: 100%; border-collapse: collapse; margin: 6px 0 10px; }
+.ttab td { padding: 4px 6px 4px 0; }
+.ttab input[type=number] { width: 80px; }
+#set-money label input { margin-left: 6px; }

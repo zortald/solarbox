@@ -107,10 +107,23 @@ pub async fn get_config(State(st): State<AppState>) -> Response {
 /// Replace config.json (validated first).
 pub async fn put_config(State(st): State<AppState>, h: HeaderMap, body: String) -> Response {
     if !admin_ok(&st, &h) { return deny(&st); }
+    let before = st.config.get();
     match st.config.save(&body) {
         Ok(_) => {
             eprintln!("[config] replaced via API");
-            crate::changes::notify(&st, "Конфигурация (config.json) изменена".into(), crate::changes::By::Dashboard);
+            let after: Option<crate::config::Config> = serde_json::from_str(&body).ok();
+            let text = match after {
+                Some(a) if a.money != before.money => {
+                    let cur = &a.money.currency;
+                    let lines: Vec<String> = a.money.tariffs.iter().map(|t| {
+                        format!("с {} — {} {cur}/кВт·ч{}", t.from, t.price,
+                            t.night_price.map(|n| format!(", ночью {n} ({:02}–{:02})", t.night_from, t.night_to)).unwrap_or_default())
+                    }).collect();
+                    format!("Тариф на электричество:\n{}", if lines.is_empty() { "не задан".into() } else { lines.join("\n") })
+                }
+                _ => "Конфигурация (config.json) изменена".into(),
+            };
+            crate::changes::notify(&st, text, crate::changes::By::Dashboard);
             Json(serde_json::json!({ "ok": true })).into_response()
         }
         Err(e) => bad(StatusCode::BAD_REQUEST, e),

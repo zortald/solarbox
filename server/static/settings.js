@@ -56,6 +56,53 @@
       `<details><summary>config.json</summary><pre>${esc(JSON.stringify(Object.fromEntries(Object.entries(c).filter(([k]) => !['load_error', 'admin'].includes(k))), null, 2))}</pre></details>`;
   }
 
+  // ---- tariffs: periods from a date, optional night zone; stored in config.json → money ----
+  async function moneyPanel() {
+    const el = $('#set-money');
+    let cfg; try { cfg = await api('/api/config'); } catch (e) { el.textContent = e.message; return; }
+    const m = cfg.money || { currency: 'грн', tariffs: [] };
+    let rows = (m.tariffs || []).map((t) => ({ ...t })).sort((a, b) => a.from.localeCompare(b.from));
+    const hours = (sel) => [...Array(24).keys()].map((h) => `<option value="${h}"${h === sel ? ' selected' : ''}>${String(h).padStart(2, '0')}:00</option>`).join('');
+    const draw = () => {
+      el.innerHTML = `<p class="muted small">Цена за кВт·ч из сети. Когда тариф меняется — добавь строку с даты изменения: старые дни считаются по старой цене. Ночная цена — для двухзонного тарифа (оставь пустой, если тариф один). Суммы — оценка: инвертор не меряет сеть, её потребление считается по балансу.</p>
+        ${rows.length ? `<table class="ttab"><tr class="muted"><td>с даты</td><td>цена</td><td>ночью</td><td>ночь с</td><td>до</td><td></td></tr>` + rows.map((t, i) => `<tr>
+          <td><input type="date" data-t="${i}" data-f="from" value="${esc(t.from)}"></td>
+          <td><input type="number" step="0.01" min="0" data-t="${i}" data-f="price" value="${t.price ?? ''}"></td>
+          <td><input type="number" step="0.01" min="0" data-t="${i}" data-f="night_price" value="${t.night_price ?? ''}" placeholder="—"></td>
+          <td><select data-t="${i}" data-f="night_from">${hours(t.night_from ?? 23)}</select></td>
+          <td><select data-t="${i}" data-f="night_to">${hours(t.night_to ?? 7)}</select></td>
+          <td><button class="btn xs adm" data-tdel="${i}">✕</button></td></tr>`).join('') + '</table>'
+          : '<p class="muted small">Тариф не задан — деньги не считаются.</p>'}
+        <div class="row"><label class="small">Валюта <input id="m-cur" value="${esc(m.currency || 'грн')}" style="width:70px"></label>
+          <button class="btn adm" id="m-add">+ Тариф с даты</button><button class="btn on adm" id="m-save">Сохранить</button></div>`;
+      el.querySelectorAll('[data-t]').forEach((inp) => (inp.onchange = () => {
+        const t = rows[+inp.dataset.t], f = inp.dataset.f;
+        t[f] = f === 'from' ? inp.value : inp.value === '' ? null : +inp.value;
+      }));
+      el.querySelectorAll('[data-tdel]').forEach((b) => (b.onclick = () => { if (requireAdmin()) { rows.splice(+b.dataset.tdel, 1); draw(); } }));
+      $('#m-add').onclick = () => {
+        if (!requireAdmin()) return;
+        const last = rows[rows.length - 1];
+        const d = new Date(); const today = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+        rows.push({ from: today, price: last?.price ?? null, night_price: last?.night_price ?? null, night_from: 23, night_to: 7 });
+        draw();
+      };
+      $('#m-save').onclick = async () => {
+        if (!requireAdmin()) return;
+        const bad = rows.find((t) => !/^\d{4}-\d{2}-\d{2}$/.test(t.from || '') || !(t.price > 0));
+        if (bad) return toast('У каждой строки нужны дата и цена', true);
+        if (new Set(rows.map((t) => t.from)).size !== rows.length) return toast('Две строки с одной датой', true);
+        const tariffs = rows.map((t) => ({ from: t.from, price: +t.price, ...(t.night_price ? { night_price: +t.night_price } : {}), night_from: +(t.night_from ?? 23), night_to: +(t.night_to ?? 7) }));
+        const fresh = await api('/api/config');
+        const out = Object.fromEntries(Object.entries(fresh).filter(([k]) => !['load_error', 'admin'].includes(k)));
+        out.money = { currency: ($('#m-cur').value || 'грн').trim(), tariffs };
+        try { await api('/api/config', { method: 'PUT', json: out }); toast('Тариф сохранён'); moneyPanel(); }
+        catch (e) { toast('Не сохранилось: ' + e.message, true); }
+      };
+    };
+    draw();
+  }
+
   async function tg() {
     const el = $('#set-tg');
     if (!SB.isAdmin) { el.innerHTML = '<p class="muted small">Настройка Telegram — после входа («Войти» в меню).</p>'; return; }
@@ -101,7 +148,7 @@
   }
 
   page('settings', {
-    show() { system(); ui(); tg(); timer = setInterval(system, 5000); },
+    show() { system(); ui(); tg(); moneyPanel(); timer = setInterval(system, 5000); },
     hide() { clearInterval(timer); },
   });
 })();

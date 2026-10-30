@@ -13,6 +13,10 @@ const MAX_GAP_S: i64 = 120;
 /// Below this the "grid" residual is the inverter's own losses, not grid draw.
 const GRID_MIN_W: f64 = 40.0;
 pub const KEYS: [&str; 5] = ["pv", "load", "chg", "dis", "grid"];
+/// (local day, local hour 0..23, key, Wh)
+pub type Delta = (String, u8, &'static str, f64);
+/// Kept per hour too, for time-of-day tariffs.
+const HOURLY: [&str; 2] = ["grid", "load"];
 /// Daily extremes kept exactly (history thinning would flatten short peaks):
 /// key → (device, metric, is_max).
 const EXT: [(&str, &str, &str, bool); 4] = [
@@ -41,6 +45,13 @@ pub fn init(conn: &Connection) -> rusqlite::Result<()> {
              wh  REAL NOT NULL,
              PRIMARY KEY(day, key)
          ) WITHOUT ROWID;
+         CREATE TABLE IF NOT EXISTS energy_hourly(
+             day  TEXT NOT NULL,
+             hour INTEGER NOT NULL,
+             key  TEXT NOT NULL,
+             wh   REAL NOT NULL,
+             PRIMARY KEY(day, hour, key)
+         ) WITHOUT ROWID;
          CREATE TABLE IF NOT EXISTS energy_ext(
              day TEXT NOT NULL,
              key TEXT NOT NULL,
@@ -55,8 +66,8 @@ impl Energy {
         Energy { s: Mutex::new(S::default()) }
     }
 
-    /// Feed one packet; returns watt-hours added per (day, key).
-    pub fn feed(&self, device: &str, ts: i64, metrics: &HashMap<String, f64>, tz: &Tz) -> Vec<(String, &'static str, f64)> {
+    /// Feed one packet; returns watt-hours added per (day, local hour, key).
+    pub fn feed(&self, device: &str, ts: i64, metrics: &HashMap<String, f64>, tz: &Tz) -> Vec<Delta> {
         let mut s = self.s.lock().unwrap();
         let mut streams: Vec<(&'static str, f64)> = Vec::new();
         let take = |s: &mut S, name: &'static str| {
@@ -96,10 +107,11 @@ impl Energy {
                 }
                 let wh = p0 * dt as f64 / 3600.0;
                 let day = tz.day(t0);
+                let hour = (tz.minute_of_day(t0) / 60) as u8;
                 match stream {
-                    "batt" if wh > 0.0 => out.push((day, "chg", wh)),
-                    "batt" => out.push((day, "dis", -wh)),
-                    k => out.push((day, k, wh.max(0.0))),
+                    "batt" if wh > 0.0 => out.push((day, hour, "chg", wh)),
+                    "batt" => out.push((day, hour, "dis", -wh)),
+                    k => out.push((day, hour, k, wh.max(0.0))),
                 }
             }
         }
@@ -171,17 +183,60 @@ pub fn backfill_ext(conn: &Connection, tz: &Tz) -> rusqlite::Result<usize> {
     Ok(n)
 }
 
-pub fn store(conn: &Connection, deltas: &[(String, &'static str, f64)]) -> rusqlite::Result<()> {
+pub fn store(conn: &Connection, deltas: &[Delta]) -> rusqlite::Result<()> {
     let mut st = conn.prepare_cached(
         "INSERT INTO energy_daily(day, key, wh) VALUES(?1, ?2, ?3)
          ON CONFLICT(day, key) DO UPDATE SET wh = wh + excluded.wh",
     )?;
-    for (day, key, wh) in deltas {
+    for (day, _, key, wh) in deltas {
         if *wh > 0.0 {
             st.execute(params![day, key, wh])?;
         }
     }
+    store_hourly(conn, deltas)
+}
+
+fn store_hourly(conn: &Connection, deltas: &[Delta]) -> rusqlite::Result<()> {
+    let mut st = conn.prepare_cached(
+        "INSERT INTO energy_hourly(day, hour, key, wh) VALUES(?1, ?2, ?3, ?4)
+         ON CONFLICT(day, hour, key) DO UPDATE SET wh = wh + excluded.wh",
+    )?;
+    for (day, hour, key, wh) in deltas {
+        if *wh > 0.0 && HOURLY.contains(key) {
+            st.execute(params![day, hour, key, wh])?;
+        }
+    }
     Ok(())
+}
+
+/// One-time fill of the hourly table from stored history (it was added later
+/// than the daily one).
+pub fn backfill_hourly(conn: &Connection, tz: &Tz) -> rusqlite::Result<usize> {
+    let empty: bool = conn.query_row("SELECT NOT EXISTS(SELECT 1 FROM energy_hourly)", [], |r| r.get(0))?;
+    if !empty {
+        return Ok(0);
+    }
+    let e = Energy::new();
+    let mut n = 0;
+    for (ts, dev, metric, v) in history(conn)? {
+        let d = e.feed(&dev, ts, &HashMap::from([(metric, v)]), tz);
+        n += d.len();
+        store_hourly(conn, &d)?;
+    }
+    Ok(n)
+}
+
+/// The four source metrics of the integrator, in time order.
+fn history(conn: &Connection) -> rusqlite::Result<Vec<(i64, String, String, f64)>> {
+    let mut st = conn.prepare(
+        "SELECT p.ts, m.device, m.metric, p.v FROM points p JOIN metrics m ON m.id = p.mid
+         WHERE (m.device = 'inverter' AND m.metric IN ('pv_w', 'ac_out_w', 'grid_v'))
+            OR (m.device = 'bms' AND m.metric = 'bms_w')",
+    )?;
+    let mut ev: Vec<(i64, String, String, f64)> =
+        st.query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get::<_, i64>(3)? as f64 / 1000.0)))?.collect::<rusqlite::Result<_>>()?;
+    ev.sort_by_key(|e| e.0);
+    Ok(ev)
 }
 
 /// kWh per key for one day.
@@ -204,16 +259,7 @@ pub fn backfill(conn: &Connection, tz: &Tz) -> rusqlite::Result<usize> {
     if !empty {
         return Ok(0);
     }
-    let mut ev: Vec<(i64, String, String, f64)> = {
-        let mut st = conn.prepare(
-            "SELECT p.ts, m.device, m.metric, p.v FROM points p JOIN metrics m ON m.id = p.mid
-             WHERE (m.device = 'inverter' AND m.metric IN ('pv_w', 'ac_out_w', 'grid_v'))
-                OR (m.device = 'bms' AND m.metric = 'bms_w')",
-        )?;
-        let rows = st.query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get::<_, i64>(3)? as f64 / 1000.0)))?;
-        rows.collect::<rusqlite::Result<_>>()?
-    };
-    ev.sort_by_key(|e| e.0);
+    let ev = history(conn)?;
     let e = Energy::new();
     let mut n = 0;
     for (ts, dev, metric, v) in ev {
@@ -268,8 +314,37 @@ pub async fn api(State(st): State<AppState>, Query(q): Query<Q>) -> Response {
         };
         by[i].1.insert(key, serde_json::json!((v * 10.0).round() / 10.0));
     }
+    // Money: grid kWh and the house's non-grid kWh, hour by hour, at that hour's price.
+    let money = &st.config.get().money;
+    if !money.tariffs.is_empty() {
+        let hourly: Vec<(String, u8, String, f64)> = {
+            let c = st.db.lock().unwrap();
+            c.prepare("SELECT day, hour, key, wh FROM energy_hourly WHERE day >= ?1")
+                .and_then(|mut s| s.query_map(params![from_day], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)))?.collect())
+                .unwrap_or_default()
+        };
+        let mut hours: HashMap<(String, u8), (f64, f64)> = HashMap::new(); // (grid, load) Wh
+        for (day, hour, key, wh) in hourly {
+            let e = hours.entry((day, hour)).or_default();
+            if key == "grid" { e.0 += wh } else { e.1 += wh }
+        }
+        let mut per_day: HashMap<String, (f64, f64)> = HashMap::new(); // (cost, saved)
+        for ((day, hour), (grid, load)) in hours {
+            let Some(p) = money.price(&day, hour) else { continue };
+            let e = per_day.entry(day).or_default();
+            e.0 += grid / 1000.0 * p;
+            e.1 += (load - grid).max(0.0) / 1000.0 * p;
+        }
+        for (day, m) in by.iter_mut() {
+            if let Some((cost, saved)) = per_day.get(day) {
+                m.insert("cost".into(), serde_json::json!((cost * 100.0).round() / 100.0));
+                m.insert("saved".into(), serde_json::json!((saved * 100.0).round() / 100.0));
+            }
+        }
+    }
     let items: Vec<_> = by.into_iter().map(|(day, mut m)| { m.insert("day".into(), day.into()); serde_json::Value::Object(m) }).collect();
-    Json(serde_json::json!({ "today": tz.day(now), "keys": KEYS, "days": items })).into_response()
+    Json(serde_json::json!({ "today": tz.day(now), "keys": KEYS, "days": items,
+        "currency": money.currency, "tariffs": !money.tariffs.is_empty() })).into_response()
 }
 
 #[cfg(test)]
@@ -295,7 +370,7 @@ mod tests {
                 m.insert("pv_w".into(), 500.0); m.insert("ac_out_w".into(), 1000.0); m.insert("grid_v".into(), 230.0);
                 ("inverter".to_string(), m)
             }] {
-                for (_, k, wh) in e.feed(&dev, ts, &m, &tz) { *total.entry(k).or_default() += wh; }
+                for (_, _, k, wh) in e.feed(&dev, ts, &m, &tz) { *total.entry(k).or_default() += wh; }
             }
         }
         let near = |k: &str, want: f64| assert!((total.get(k).copied().unwrap_or(0.0) - want).abs() < 1.0, "{k}: {:?}", total.get(k));
@@ -326,7 +401,7 @@ mod tests {
         let m = |w: f64| HashMap::from([("pv_w".to_string(), w)]);
         assert!(e.feed("inverter", t, &m(3600.0), &tz).is_empty());
         let d = e.feed("inverter", t + 10, &m(3600.0), &tz);
-        assert_eq!(d, vec![("2026-11-30".to_string(), "pv", 10.0)], "10 s at 3.6 kW = 10 Wh, on the day it started");
+        assert_eq!(d, vec![("2026-11-30".to_string(), 23, "pv", 10.0)], "10 s at 3.6 kW = 10 Wh, on the day and hour it started");
         assert!(e.feed("inverter", t + 10 + 600, &m(0.0), &tz).is_empty(), "10-minute gap isn't integrated");
     }
 }

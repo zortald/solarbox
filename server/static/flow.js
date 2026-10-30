@@ -107,7 +107,7 @@
     set('fe-pv', E.pv === undefined ? '' : kwh(E.pv));
     // grid
     set('fv-grid', p.gridUp ? '≈ ' + W(p.grid) : 'нет');
-    set('fe-grid', kwh(E.grid));
+    set('fe-grid', kwh(E.grid) + (E.cost != null ? ` · ${E.cost.toFixed(E.cost < 100 ? 2 : 0)} ${E.cur}` : ''));
     set('fg-1', p.gridUp ? num(p.gv, 0) + ' V' : out_()?.current ? 'нет ' + span(Date.now() / 1000 - out_().current.start) : 'сети нет');
     set('fg-2', p.gridUp ? num(v('inverter', 'grid_hz'), 1) + ' Hz' : '');
     document.getElementById('grid-x').style.display = p.gridUp ? 'none' : '';
@@ -168,7 +168,7 @@
     try {
       const d = await api('/api/energy?days=1');
       const t = d.days.find((x) => x.day === d.today) || {};
-      today = { pv: t.pv ?? 0, load: t.load ?? 0, chg: t.chg ?? 0, dis: t.dis ?? 0, grid: t.grid ?? 0 };
+      today = { pv: t.pv ?? 0, load: t.load ?? 0, chg: t.chg ?? 0, dis: t.dis ?? 0, grid: t.grid ?? 0, cost: t.cost, cur: d.currency };
     } catch (e) { /* keep previous */ }
   }
 

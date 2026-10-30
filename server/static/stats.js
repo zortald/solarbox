@@ -28,7 +28,8 @@
   let range = load('sbStatsRange', '30d');
   if (!RANGES.some((r) => r[0] === range)) range = '30d';
   const hidden = new Set(load('sbStatsHidden', ['chg', 'dis'])), dayHidden = new Set(load('sbDayHidden', []));
-  let data = null, day = null, dayData = null, month = null;
+  let data = null, day = null, dayData = null, month = null, cur = 'грн', hasTariff = false;
+  const money = (v) => (v === undefined || !isFinite(v) ? '—' : `${v.toFixed(Math.abs(v) < 100 ? 2 : 0)} ${cur}`);
   const MONTHS = ['янв', 'фев', 'мар', 'апр', 'май', 'июн', 'июл', 'авг', 'сен', 'окт', 'ноя', 'дек'];
   const p2 = (n) => String(n).padStart(2, '0');
   const iso = (d) => `${d.getFullYear()}-${p2(d.getMonth() + 1)}-${p2(d.getDate())}`;
@@ -68,7 +69,7 @@
     for (const d of days) {
       const m = d.day.slice(0, 7);
       const o = (by[m] ||= { day: m, label: MONTHS[+m.slice(5) - 1] + ' ' + m.slice(2, 4) });
-      for (const s of SER) o[s.k] = (o[s.k] || 0) + (d[s.k] || 0);
+      for (const k of [...SER.map((s) => s.k), 'cost', 'saved']) o[k] = (o[k] || 0) + (d[k] || 0);
     }
     return Object.values(by);
   }
@@ -123,6 +124,7 @@
       ['Дом', `${fmt(sum('load'))} кВт·ч`, `пик ${fmt(ext('load_max', Math.max), 0)} Вт${avg('load')}`],
       ['Сеть ≈', `${fmt(sum('grid'))} кВт·ч`, avg('grid').replace(' · ', '')],
       ['АКБ', `+${fmt(sum('chg'))} / −${fmt(sum('dis'))} кВт·ч`, `заряд ${fmt(ext('soc_min', Math.min), 0)}–${fmt(ext('soc_max', Math.max), 0)} %`],
+      ...(hasTariff ? [['Деньги', `≈ ${money(sum('cost'))} за сеть`, `сэкономлено ≈ ${money(sum('saved'))}${nDays > 1 && days.length ? ` · ≈${money(sum('cost') / days.length)} в день` : ''}`]] : []),
       ['Без света', outs.length ? span(offSecs) : 'не было', outs.length ? `${outs.length} раз` + (outs.length > 1 ? ` · самое долгое ${span(Math.max(...outs.map((o) => o.to - o.from)))}` : '') : ''],
     ].map(([l, v, sub]) => `<div><span>${l}</span><b>${v}</b>${sub ? `<small>${sub}</small>` : ''}</div>`).join('');
     const long = nDays > 1, MAXROWS = 30;
@@ -163,6 +165,7 @@
       api('/api/energy?days=800').catch(() => ({ days: [] })),
     ]);
     const outs = clipOuts(out.items, from, to);
+    cur = energy.currency || cur; hasTariff = !!energy.tariffs;
     dayData = { day, from, to, series, outs, kwh: (energy.days || []).find((d) => d.day === day) || {} };
     if (range === 'day') render();
   }
@@ -197,12 +200,13 @@
   // ---- table (always days/months of the data loaded; day rows open the day) ----
   function table() {
     const R = rows().filter((r) => SER.some((s) => r[s.k])).reverse();
-    const tot = {}; for (const r of R) for (const s of SER) tot[s.k] = (tot[s.k] || 0) + (r[s.k] || 0);
+    const tot = {}; for (const r of R) for (const k of [...SER.map((s) => s.k), 'cost']) tot[k] = (tot[k] || 0) + (r[k] || 0);
+    const mc = (v) => (hasTariff ? `<td>${v ? v.toFixed(v < 100 ? 2 : 0) : '—'}</td>` : '');
     const f = (v) => (v ? v.toFixed(1) : '—');
-    $('#st-table').innerHTML = R.length ? `<table class="stab"><tr><th></th>${SER.map((s) => `<th style="color:${s.color}">${s.label}</th>`).join('')}</tr>
-      <tr class="tot"><td>Итого</td>${SER.map((s) => `<td>${f(tot[s.k])}</td>`).join('')}</tr>
-      ${R.map((r) => `<tr${r.day.length === 10 ? ` class="link${range === 'day' && r.day === day ? ' sel' : ''}" data-day="${r.day}"` : ` class="link" data-month="${r.day}"`}><td>${r.label}</td>${SER.map((s) => `<td>${f(r[s.k])}</td>`).join('')}</tr>`).join('')}</table>
-      <p class="muted small">кВт·ч. Считается на сервере по каждому пакету от плат (раз в 5 с). «Сеть ≈» — оценка по балансу: инвертор не измеряет мощность сети. Нажми на строку, чтобы открыть ${range === '12m' ? 'месяц' : 'день'}.</p>`
+    $('#st-table').innerHTML = R.length ? `<table class="stab"><tr><th></th>${SER.map((s) => `<th style="color:${s.color}">${s.label}</th>`).join('')}${hasTariff ? `<th>${cur}</th>` : ''}</tr>
+      <tr class="tot"><td>Итого</td>${SER.map((s) => `<td>${f(tot[s.k])}</td>`).join('')}${mc(tot.cost)}</tr>
+      ${R.map((r) => `<tr${r.day.length === 10 ? ` class="link${range === 'day' && r.day === day ? ' sel' : ''}" data-day="${r.day}"` : ` class="link" data-month="${r.day}"`}><td>${r.label}</td>${SER.map((s) => `<td>${f(r[s.k])}</td>`).join('')}${mc(r.cost)}</tr>`).join('')}</table>
+      <p class="muted small">кВт·ч. Считается на сервере по каждому пакету от плат (раз в 5 с). «Сеть ≈» — оценка по балансу: инвертор не измеряет мощность сети${hasTariff ? `, поэтому и деньги — оценка (${cur} считаются по тарифу на каждый час)` : ''}. Нажми на строку, чтобы открыть ${range === '12m' ? 'месяц' : 'день'}.</p>`
       : '<div class="empty">Пока нет данных за этот период.</div>';
     document.querySelectorAll('#st-table [data-day]').forEach((tr) => (tr.onclick = () => openDay(tr.dataset.day)));
     document.querySelectorAll('#st-table [data-month]').forEach((tr) => (tr.onclick = () => openMonth(tr.dataset.month)));
@@ -273,6 +277,7 @@
       api(`/api/outages?from=${from}&to=${to}`).catch(() => ({ items: [] })),
     ]);
     data = d; periodOuts = o.items || [];
+    cur = d.currency || cur; hasTariff = !!d.tariffs;
     render();
   }
 
