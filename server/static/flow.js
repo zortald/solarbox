@@ -32,6 +32,9 @@
 
   function build() {
     $('#flow-svg').innerHTML =
+      // Split colours for the house when several sources feed it (hard stops).
+      `<defs><linearGradient id="gl-obj" x1="0" y1="0" x2="1" y2="0"></linearGradient>
+       <linearGradient id="gl-line" gradientUnits="userSpaceOnUse" x1="285" y1="0" x2="418" y2="0"></linearGradient></defs>` +
       LINKS.map(([id, d]) => `<path d="${d}" class="fline" id="fl-${id}l" style="stroke:${C[id]}"/><path d="${d}" class="fdash" id="fd-${id}" style="stroke:${C[id]}"/>`).join('') +
       // PV header + box
       // PV: two-line box — watts now, today's kWh under it; voltage to the right
@@ -48,7 +51,7 @@
       T('fi-temp', 250, 234, 'fsm') +
       T('fo-1', 292, 160, 'fs', 'start') + T('fo-2', 292, 174, 'fs', 'start') + T('fo-3', 292, 188, 'fs', 'start') +
       // load
-      box('load', 308, 189, C.load) + ICON.load(426, 178) +
+      box('load', 308, 189, C.load) + ICON.load(426, 178) + T('fl-mix', 300, 290, 'fs', 'start') +
       T('fl-load', 350, 242, 'flab', 'middle', 'Потребление сегодня') + T('fe-load', 350, 264, 'fe') +
       // battery
       box('batt', 208, 278, C.batt) +
@@ -81,6 +84,39 @@
     const hh = String(at.getHours()).padStart(2, '0'), mm = String(at.getMinutes()).padStart(2, '0');
     const d = Math.floor(hours / 24), h = Math.floor(hours % 24), m = Math.round((hours * 60) % 60);
     return [`ВРЕМЯ ДО ${toward} @${hh}:${mm}`, (d ? d + ' д ' : '') + (d || h ? h + ' ч ' : '') + m + ' мин'];
+  }
+
+  const SRC_NAME = { pv: 'солнце', grid: 'сеть', batt: 'АКБ' };
+  function houseColours(p) {
+    const fed = { grid: p.grid, batt: Math.max(0, -p.batt) };
+    fed.pv = Math.max(0, p.load - fed.grid - fed.batt);
+    const total = fed.pv + fed.grid + fed.batt;
+    // shares ≥ 5 %, biggest first, rounded to 5 % so the picture doesn't flicker
+    let parts = p.load > 5 && total > 0
+      ? Object.entries(fed).map(([k, w]) => [k, Math.round((w / total) * 20) / 20]).filter(([, f]) => f >= 0.05).sort((a, b) => b[1] - a[1])
+      : [];
+    const sum = parts.reduce((a, [, f]) => a + f, 0);
+    parts = parts.map(([k, f]) => [k, f / sum]);
+    const key = parts.map(([k, f]) => k + f.toFixed(2)).join();
+    if (key === loadColor) return;
+    loadColor = key;
+    const ids = { obj: ['fb-load', 'fi-load'], line: ['fl-loadl', 'fd-load'] };
+    if (parts.length <= 1) {
+      const c = parts.length ? C[parts[0][0]] : C.load;
+      for (const id of [...ids.obj, ...ids.line]) document.getElementById(id).style.stroke = c;
+      document.getElementById('fl-mix').textContent = '';
+      return;
+    }
+    let at = 0, stops = '';
+    for (const [k, f] of parts) {
+      stops += `<stop offset="${at}" stop-color="${C[k]}"/><stop offset="${at + f}" stop-color="${C[k]}"/>`;
+      at += f;
+    }
+    document.getElementById('gl-obj').innerHTML = stops;
+    document.getElementById('gl-line').innerHTML = stops;
+    for (const id of ids.obj) document.getElementById(id).style.stroke = 'url(#gl-obj)';
+    for (const id of ids.line) document.getElementById(id).style.stroke = 'url(#gl-line)';
+    document.getElementById('fl-mix').innerHTML = parts.map(([k, f]) => `<tspan style="fill:${C[k]}">${SRC_NAME[k]} ${Math.round(f * 100)}%</tspan>`).join(' · ');
   }
 
   function power() {
@@ -120,17 +156,9 @@
     set('fo-3', v('inverter', 'load_pct') !== undefined ? num(v('inverter', 'load_pct'), 0) + ' %' : '');
     set('fi-temp', v('inverter', 'temp') !== undefined ? num(v('inverter', 'temp'), 0) + '°' : '');
     document.getElementById('fi-dot').classList.toggle('bad', !fresh('inverter'));
-    // load — coloured by what feeds the house most right now
+    // load — coloured by what feeds the house: one colour, or split by shares
     set('fv-load', W(p.load));
-    const fed = { grid: p.grid, batt: Math.max(0, -p.batt) };
-    fed.pv = Math.max(0, p.load - fed.grid - fed.batt);
-    const src = p.load > 5 ? Object.entries(fed).sort((a, b) => b[1] - a[1])[0][0] : null;
-    const lc = src ? C[src] : C.load;
-    if (lc !== loadColor) {
-      loadColor = lc;
-      for (const id of ['fl-loadl', 'fd-load', 'fb-load', 'fi-load']) document.getElementById(id).style.stroke = lc;
-    }
-    document.getElementById('fi-load').setAttribute('data-src', src || '');
+    houseColours(p);
     set('fe-load', kwh(E.load));
     // battery
     const soc = v('bms', 'soc'), a = v('bms', 'bms_a'), cap = v('bms', 'cap_ah'), bv = v('bms', 'bms_v') ?? v('inverter', 'batt_v');
