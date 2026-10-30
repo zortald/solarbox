@@ -105,12 +105,19 @@
     const el = $('#bms-cal');
     const get = async (p) => { try { return await entity('bms', p); } catch (e) { return undefined; } };
     const vals = await Promise.all(CAL.map((c) => get(c.path)));
+    // Highest cell over the last day: the SOC100 threshold must be at or below it.
+    let peak; try {
+      const now = Math.floor(Date.now() / 1000);
+      const d = await api(`/api/series?device=bms&metric=cell_max&from=${now - 86400}&to=${now}&points=500`);
+      if (d.v.length) peak = Math.max(...d.v);
+    } catch (e) {}
     let inv; try { const q = (await entity('inverter', 'text_sensor/inverter raw qpiri')).value.replace('(', '').trim().split(/\s+/); inv = +q[10] / N; } catch (e) {}
     if (vals.every((x) => x === undefined)) { el.innerHTML = '<div class="empty">Плата BMS не отвечает или прошивка без калибровки.</div>'; return; }
     el.innerHTML = CAL.map((c, i) => {
       const x = vals[i]?.value;
       const cur = c.write ? `сейчас BMS показывает ${num(v('bms', 'soc'), 0)} %` : `сейчас: ${x ?? '—'} ${c.unit}` +
-        (c.hint && inv ? ` · инвертор заряжает до ${inv.toFixed(3)} В на ячейку${+x > inv ? ' — <b class="bad">порог выше, 100 % не наступит</b>' : ''}` : '');
+        (c.hint && inv ? ` · инвертор заряжает до ${inv.toFixed(4)} В на ячейку (в среднем)` : '') +
+        (c.hint && peak ? ` · самая высокая ячейка за сутки ${peak.toFixed(3)} В${+x > peak + 0.0005 ? ' — <b class="bad">порог выше, 100 % не наступит</b>' : ' — порог достигается'}` : '');
       return `<div class="srow"><span class="lab">${c.l}</span><span class="cur">${cur}</span>
         <span class="ctl"><input type="number" data-cal="${c.id}" min="${c.min}" max="${c.max}" step="${c.step}" value="${c.write ? '' : esc(x ?? '')}" style="width:90px"> ${c.unit}
         <button class="btn adm" data-calap="${c.id}">${c.write ? 'Установить' : 'Применить'}</button></span></div>`;
