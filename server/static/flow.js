@@ -82,7 +82,7 @@
     if (!isFinite(hours) || hours <= 0 || hours > 24 * 30) return ['', ''];
     const at = new Date(Date.now() + hours * 3600e3);
     const hh = String(at.getHours()).padStart(2, '0'), mm = String(at.getMinutes()).padStart(2, '0');
-    const d = Math.floor(hours / 24), h = Math.floor(hours % 24), m = Math.round((hours * 60) % 60);
+    const total = Math.round(hours * 60), d = Math.floor(total / 1440), h = Math.floor((total % 1440) / 60), m = total % 60;
     return [`ВРЕМЯ ДО ${toward} @${hh}:${mm}`, (d ? d + ' д ' : '') + (d || h ? h + ' ч ' : '') + m + ' мин'];
   }
 
