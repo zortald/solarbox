@@ -4,12 +4,13 @@
 
 | Router CPU (`/system/resource/print` → architecture) | Build |
 |---|---|
-| `arm` (e.g. hAP ax S, EN7562CT) | `./deploy/build-armv5.sh` → `solarbox-armv5.tar` |
-| `arm` with ARMv7 cores | `./deploy/build-armv7.sh` |
-| `arm64` | `./deploy/build-arm64.sh` |
+| `arm` (e.g. hAP ax S, EN7562CT) | `./deploy/build-router.sh armv5` → `solarbox-armv5.tar` |
+| `arm` with ARMv7 cores | `./deploy/build-router.sh armv7` |
+| `arm64` | `./deploy/build-router.sh arm64` |
 
-The build scripts write the legacy `docker save` format: RouterOS rejects
-Docker Desktop's OCI export with "could not load next layer".
+The build runs in Apple `container` (`brew install container`,
+`container system start`) and writes the legacy `docker save` format:
+RouterOS rejects OCI-layout exports with "could not load next layer".
 
 ## 1. Container package
 

@@ -1,8 +1,10 @@
-# Build a fully static musl binary with the dashboard embedded, then drop it
-# into a minimal Alpine image. Alpine is musl-native, so on an arm64 build host
-# (Apple Silicon) this compiles aarch64-unknown-linux-musl with no cross setup.
+# Image for running solarbox on this Mac or another host (RouterOS images come
+# from build-router.sh). Builds a fully static musl binary with the dashboard
+# embedded and drops it into a minimal Alpine image. Alpine is musl-native, so
+# on Apple Silicon this compiles aarch64-unknown-linux-musl with no cross setup.
 #
-#   docker buildx build --platform linux/arm64 -f deploy/Dockerfile -t solarbox:arm64 --load .
+#   container build -f deploy/Dockerfile -t solarbox:arm64 .
+#   container run -d --name solarbox -p 8080:8080 -v solarbox-data:/data solarbox:arm64
 
 FROM rust:alpine AS build
 RUN apk add --no-cache musl-dev gcc

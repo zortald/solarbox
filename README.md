@@ -19,7 +19,7 @@ boards ──POST JSON──▶ /api/ingest ──▶ SQLite ──▶ dashboard
 | `server/`    | Rust (axum + rusqlite, SQLite bundled), dashboard embedded.     |
 | `server/static/` | Dependency-free dashboard (own canvas chart, no CDN).       |
 | `firmware/`  | The two ESPHome board configs + how they push to `/api/ingest`. |
-| `deploy/`    | Docker builds (armv5/armv7/arm64), push scripts, RouterOS guide. |
+| `deploy/`    | Router image build (armv5/armv7/arm64), push scripts, RouterOS guide. |
 
 ## HTTP API
 
@@ -64,10 +64,10 @@ forces one. The pass is idempotent — a band already on its grid is skipped.
 
 Local (needs Rust): `cd server && cargo run`.
 
-For the router (no local Rust needed — builds in Docker):
+For the router (no local Rust needed — builds in Apple `container`):
 
 ```
-./deploy/build-armv5.sh      # → solarbox-armv5.tar (or build-armv7.sh / build-arm64.sh)
+./deploy/build-router.sh armv5   # → solarbox-armv5.tar (or armv7 / arm64)
 ```
 
 then import per [`deploy/routeros.md`](deploy/routeros.md).
