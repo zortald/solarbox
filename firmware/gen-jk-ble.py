@@ -62,10 +62,24 @@ def slot_block(n):
             a = (a << 4) | v; n++;
           }}
           cl->disconnect();
+          id(bms{i}_seen) = millis();
+          id(bms{i}_on) = n == 12;
           if (n != 12) {{ cl->set_auto_connect(false); ESP_LOGI("solarbox", "слот {i}: BMS не задана"); return; }}
           cl->set_address(a);
           cl->set_auto_connect(true);
           ESP_LOGI("solarbox", "слот {i}: BMS %s, %s", id(bms{i}_mac).state.c_str(), pr.c_str());
+""",
+        "globals": f"""  - id: bms{i}_seen
+    type: uint32_t
+    initial_value: "0"
+  - id: bms{i}_on
+    type: bool
+    initial_value: "false"
+""",
+        "watch": f"""          if (id(bms{i}_on) && millis() - id(bms{i}_seen) > 10 * 60 * 1000) {{
+            ESP_LOGW("watchdog", "слот {i}: BMS молчит 10 мин — перезагрузка");
+            App.safe_reboot();
+          }}
 """,
         "text": f"""  - platform: template
     id: bms{i}_mac
@@ -101,6 +115,8 @@ def slot_block(n):
     total_voltage:
       id: b{i}_v
       name: "Напряжение АКБ V{s}"
+      on_value:
+        - lambda: id(bms{i}_seen) = millis();
     current:
       id: b{i}_a
       name: "Ток АКБ I{s}"
@@ -318,7 +334,7 @@ globals:
     type: std::map<std::string, std::string>
   - id: sb_target
     type: std::string
-
+{sec("globals")}
 esp32_ble:
   max_connections: {max(3, SLOTS)}
 
@@ -397,7 +413,12 @@ http_request:
   timeout: 3s
 
 interval:
-  - interval: 5s
+  # Перезагрузка только если заданная BMS 10 минут не присылает данных
+  # (завис Bluetooth). Слот без MAC (или с неверным MAC) не проверяется.
+  - interval: 30s
+    then:
+      - lambda: |-
+{sec("watch")}  - interval: 5s
     then:
       - script.execute: ingest_url
 {sec("push")}"""

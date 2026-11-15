@@ -60,6 +60,18 @@ globals:
     type: std::map<std::string, std::string>
   - id: sb_target
     type: std::string
+  - id: bms1_seen
+    type: uint32_t
+    initial_value: "0"
+  - id: bms1_on
+    type: bool
+    initial_value: "false"
+  - id: bms2_seen
+    type: uint32_t
+    initial_value: "0"
+  - id: bms2_on
+    type: bool
+    initial_value: "false"
 
 esp32_ble:
   max_connections: 3
@@ -122,6 +134,8 @@ script:
             a = (a << 4) | v; n++;
           }
           cl->disconnect();
+          id(bms1_seen) = millis();
+          id(bms1_on) = n == 12;
           if (n != 12) { cl->set_auto_connect(false); ESP_LOGI("solarbox", "слот 1: BMS не задана"); return; }
           cl->set_address(a);
           cl->set_auto_connect(true);
@@ -140,6 +154,8 @@ script:
             a = (a << 4) | v; n++;
           }
           cl->disconnect();
+          id(bms2_seen) = millis();
+          id(bms2_on) = n == 12;
           if (n != 12) { cl->set_auto_connect(false); ESP_LOGI("solarbox", "слот 2: BMS не задана"); return; }
           cl->set_address(a);
           cl->set_auto_connect(true);
@@ -224,6 +240,8 @@ sensor:
     total_voltage:
       id: b1_v
       name: "Напряжение АКБ V"
+      on_value:
+        - lambda: id(bms1_seen) = millis();
     current:
       id: b1_a
       name: "Ток АКБ I"
@@ -373,6 +391,8 @@ sensor:
     total_voltage:
       id: b2_v
       name: "Напряжение АКБ V #2"
+      on_value:
+        - lambda: id(bms2_seen) = millis();
     current:
       id: b2_a
       name: "Ток АКБ I #2"
@@ -615,6 +635,19 @@ http_request:
   timeout: 3s
 
 interval:
+  # Перезагрузка только если заданная BMS 10 минут не присылает данных
+  # (завис Bluetooth). Слот без MAC (или с неверным MAC) не проверяется.
+  - interval: 30s
+    then:
+      - lambda: |-
+          if (id(bms1_on) && millis() - id(bms1_seen) > 10 * 60 * 1000) {
+            ESP_LOGW("watchdog", "слот 1: BMS молчит 10 мин — перезагрузка");
+            App.safe_reboot();
+          }
+          if (id(bms2_on) && millis() - id(bms2_seen) > 10 * 60 * 1000) {
+            ESP_LOGW("watchdog", "слот 2: BMS молчит 10 мин — перезагрузка");
+            App.safe_reboot();
+          }
   - interval: 5s
     then:
       - script.execute: ingest_url
