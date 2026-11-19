@@ -19,3 +19,7 @@
 /deploy/local.env
 /deploy/site-config.json
 /firmware/site/
+
+# wrangler (relay/)
+/relay/.wrangler/
+/relay/node_modules/

@@ -53,6 +53,8 @@ jobs:
       - uses: actions/setup-node@v4
         with: { node-version: 22 }
       - name: JS syntax
-        run: for f in server/static/*.js firmware/*.js; do node --check "$f" || exit 1; done
+        run: for f in server/static/*.js firmware/*.js relay/src/*.js; do node --check "$f" || exit 1; done
+      - name: build relay
+        run: node --test relay/test.mjs
       - name: jk-ble.yaml matches its generator
         run: python3 firmware/gen-jk-ble.py && git diff --exit-code firmware/jk-ble.yaml
