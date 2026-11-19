@@ -337,10 +337,12 @@ async fn main() {
     step("Контейнер");
     ok(ros.ensure("/container/mounts", "?list=sb-data", json!({ "list": "sb-data", "src": "/sb-data", "dst": "/data" })), "папка данных");
     let mut c = json!({ "file": FILE, "interface": VETH, "root-dir": "sb-root", "mountlists": "sb-data",
-                        "logging": "yes", "start-on-boot": "yes", "name": NAME, "restart-policy": "on-failure" });
+                        "logging": "yes", "start-on-boot": "yes", "name": NAME, "restart-policy": "on-failure", "restart-interval": "10s" });
     if ros.add("/container", c.clone()).is_err() {
         // Older 7.x without restart policies.
-        c.as_object_mut().unwrap().remove("restart-policy");
+        let o = c.as_object_mut().unwrap();
+        o.remove("restart-policy");
+        o.remove("restart-interval");
         ok(ros.add("/container", c), "создание контейнера");
     }
     info("распаковывается…");

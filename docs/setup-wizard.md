@@ -129,6 +129,29 @@ demand, reused once built**.
   image is only a starter; changing it means running the installer again.
 - Boards: the same, per board, by button.
 
+## First flash through the router's USB
+
+Goal: plug a blank board into the router's USB, Solarbox flashes it and gives
+it Wi-Fi over the same cable, the owner carries it to the inverter; later
+updates go over the air. Wi-Fi: the wizard lists the router's networks, the
+owner types the password once; it goes to the board, Solarbox doesn't keep it.
+
+Checked on RouterOS CHR 7.25.1 (arm64, QEMU with the ESP32-S3 passed through):
+- the board's native USB (CDC-ACM) shows up as a serial port in `/port`
+  (`usb2`, device `1-1`, lines dtr/rts/cts);
+- `/container set … devices=1-1` (the USB device id; port names are refused)
+  gives the container `/dev/ttyACM0` (root only: the container runs as 0:0);
+- from inside, esptool put the chip into its bootloader by itself (RTS/DTR,
+  no BOOT button), loaded the stub and reset it back.
+
+Not checked yet: CH340/CP210x boards (D1 mini, ESP32 DevKit), a real
+MikroTik's USB (power for the board, other kernels), what changing `devices`
+does to a running container (a container got "Exec format error" after it on
+CHR — to find out). OpenWrt and Docker see the port directly.
+
+Restart policy: `on-failure` without an interval restarts at once forever
+(seen: thousands of restarts flooding the log); the installer sets 10 s.
+
 ## Bench
 
 Development never touches site 1. The bench: an ESP32-S3 on USB (its previous
