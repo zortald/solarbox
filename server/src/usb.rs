@@ -193,11 +193,14 @@ pub fn wifi(port: &str, ssid: &str, pw: &str) -> Result<String, String> {
     payload.extend_from_slice(pw.as_bytes());
     let mut rpc = vec![1u8, payload.len() as u8];
     rpc.extend_from_slice(&payload);
-    // The board may still be booting after the flash: ask until it answers.
+    // Send once. Again only while the board says nothing at all (still
+    // booting after the flash): repeating it while it connects restarts the
+    // attempt — seen on the bench, it never got to say «provisioned».
     let start = std::time::Instant::now();
     let (mut buf, mut sent, mut chunk) = (Vec::new(), None::<std::time::Instant>, [0u8; 512]);
     while start.elapsed() < Duration::from_secs(60) {
-        if sent.map_or(true, |t| t.elapsed() > Duration::from_secs(5)) {
+        let heard = improv_parse(&buf).iter().any(|(t, _)| *t == 1 || *t == 2);
+        if !heard && sent.map_or(true, |t| t.elapsed() > Duration::from_secs(8)) {
             sp.write_all(&improv_packet(3, &rpc)).map_err(|e| e.to_string())?;
             sent = Some(std::time::Instant::now());
         }
