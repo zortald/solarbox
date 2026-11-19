@@ -21,6 +21,16 @@ pub struct Usb {
     known: Mutex<HashMap<String, Value>>,
     /// Port name → flashing progress / result for the UI.
     pub job: Mutex<HashMap<String, Value>>,
+    /// One talk with the boards at a time: a serial port opens exclusively,
+    /// so a second request (another tab, «Искать ещё раз») waits its turn.
+    serial: Mutex<()>,
+}
+
+impl Usb {
+    pub fn one<T>(&self, f: impl FnOnce() -> T) -> T {
+        let _g = self.serial.lock().unwrap_or_else(|e| e.into_inner());
+        f()
+    }
 }
 
 fn read(p: &Path) -> String {
@@ -313,7 +323,8 @@ pub async fn identify_api(State(st): State<AppState>, Json(b): Json<PortBody>) -
         return bad(StatusCode::CONFLICT, "плату воткнули после запуска Solarbox — нужен перезапуск");
     }
     let (port, vid, pid) = (b.port.clone(), p["vid"].as_str().unwrap_or("").to_string(), p["pid"].as_str().unwrap_or("").to_string());
-    match tokio::task::spawn_blocking(move || identify(&port, &vid, &pid)).await {
+    let u = st.usb.clone();
+    match tokio::task::spawn_blocking(move || u.one(|| identify(&port, &vid, &pid))).await {
         Ok(Ok(v)) => {
             eprintln!("[usb] {}: {} {}", b.port, v["chip"], v["mac"]);
             st.usb.known.lock().unwrap().insert(b.port.clone(), v.clone());
@@ -356,7 +367,7 @@ pub async fn flash_api(State(st): State<AppState>, Json(b): Json<FlashBody>) -> 
     let (st2, port, target) = (st.clone(), b.port.clone(), b.target.clone());
     let (vid, pid) = (p["vid"].as_str().unwrap_or("").to_string(), p["pid"].as_str().unwrap_or("").to_string());
     tokio::task::spawn_blocking(move || {
-        let r = crate::library::factory(&target).and_then(|(ver, img)| flash(&st2.usb, &port, &vid, &pid, &img).map(|_| ver));
+        let r = crate::library::factory(&target).and_then(|(ver, img)| st2.usb.one(|| flash(&st2.usb, &port, &vid, &pid, &img)).map(|_| ver));
         let v = match &r {
             Ok(ver) => json!({ "state": "done", "target": target, "version": ver }),
             Err(e) if e == "building" => json!({ "state": "building", "target": target }),
@@ -369,8 +380,9 @@ pub async fn flash_api(State(st): State<AppState>, Json(b): Json<FlashBody>) -> 
 }
 
 /// POST /api/usb/scan {port} — Wi-Fi networks around the board.
-pub async fn scan_api(Json(b): Json<PortBody>) -> Response {
-    match tokio::task::spawn_blocking(move || scan(&b.port)).await {
+pub async fn scan_api(State(st): State<AppState>, Json(b): Json<PortBody>) -> Response {
+    let u = st.usb.clone();
+    match tokio::task::spawn_blocking(move || u.one(|| scan(&b.port))).await {
         Ok(Ok(v)) => Json(json!({ "ok": true, "networks": v.iter().map(|(s, r, sec)| json!({ "ssid": s, "rssi": r, "secured": sec })).collect::<Vec<_>>() })).into_response(),
         Ok(Err(e)) => bad(StatusCode::BAD_GATEWAY, e),
         Err(e) => bad(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
@@ -390,9 +402,10 @@ pub struct WifiBody {
 
 /// POST /api/usb/wifi {port, ssid, password, solarbox} — the password goes to
 /// the board only, Solarbox doesn't keep it.
-pub async fn wifi_api(Json(b): Json<WifiBody>) -> Response {
+pub async fn wifi_api(State(st): State<AppState>, Json(b): Json<WifiBody>) -> Response {
     let sb = b.solarbox.clone();
-    match tokio::task::spawn_blocking(move || wifi(&b.port, &b.ssid, &b.password)).await {
+    let u = st.usb.clone();
+    match tokio::task::spawn_blocking(move || u.one(|| wifi(&b.port, &b.ssid, &b.password))).await {
         Ok(Ok(url)) => {
             // http://10.10.0.120:80 → tell the board where Solarbox is.
             let host = url.split("://").nth(1).and_then(|h| h.split([':', '/']).next()).unwrap_or("").to_string();

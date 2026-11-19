@@ -899,11 +899,13 @@
       ${none}<p class="muted small">Плата видит сети здесь, у роутера; на месте нужна та, что ловится там. Пароль уйдёт в плату, Solarbox его не хранит.</p>${ap}`;
   }
 
+  const scanning = {}; // port → a scan request is out (one at a time)
   async function scanNets(port) {
-    if (nets[port] === 'scanning') return;
-    nets[port] = 'scanning';
+    if (scanning[port]) return;
+    scanning[port] = true; nets[port] = 'scanning';
     try { nets[port] = (await api('/api/usb/scan', { json: { port } })).networks; }
     catch (e) { nets[port] = Object.assign([], { error: e.message }); }
+    finally { delete scanning[port]; }
     render();
   }
   async function usbFlash(i) {
@@ -1002,7 +1004,7 @@
     const ws = $('#wz-wifissid');
     if (ws) ws.onchange = () => { W.wifi.other = ws.value === '\u0000other'; if (!W.wifi.other) W.wifi.ssid = ws.value; render(); };
     const wo = $('#wz-wifiother'); if (wo) wo.oninput = () => { W.wifi.ssid = wo.value; };
-    body.querySelectorAll('[data-rescan]').forEach((el) => (el.onclick = () => { delete nets[el.dataset.rescan]; render(); }));
+    body.querySelectorAll('[data-rescan]').forEach((el) => (el.onclick = () => { if (!scanning[el.dataset.rescan]) { delete nets[el.dataset.rescan]; render(); } }));
     body.querySelectorAll('[data-usbskip]').forEach((el) => (el.onclick = () => {
       const port = el.dataset.usbskip;
       if (W.usbSkip[port]) delete W.usbSkip[port]; else W.usbSkip[port] = true;
