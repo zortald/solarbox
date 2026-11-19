@@ -123,11 +123,31 @@ fn agent() -> ureq::Agent {
     ureq::AgentBuilder::new().timeout_connect(Duration::from_secs(10)).timeout(Duration::from_secs(40)).build()
 }
 
+/// Error text for the log, the journal and the UI. Transport errors carry the
+/// request URL, and the bot token is part of it: always masked.
 fn api_err(e: ureq::Error) -> String {
-    match e {
+    let s = match e {
         ureq::Error::Status(code, r) => format!("Telegram HTTP {code}: {}", r.into_string().unwrap_or_default()),
         e => format!("Telegram: {e}"),
+    };
+    mask_token(&s)
+}
+
+/// `…/bot123:ABC/getUpdates…` → `…/bot***/getUpdates…`.
+fn mask_token(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    let mut rest = s;
+    while let Some(i) = rest.find("/bot") {
+        out.push_str(&rest[..i + 4]);
+        rest = &rest[i + 4..];
+        let end = rest.find(|c: char| c == '/' || c.is_whitespace()).unwrap_or(rest.len());
+        if end > 0 {
+            out.push_str("***");
+        }
+        rest = &rest[end..];
     }
+    out.push_str(rest);
+    out
 }
 
 fn send_one(token: &str, chat: &str, text: &str) -> Result<(), String> {
@@ -337,4 +357,17 @@ pub fn spawn_bot(st: AppState) {
             }
         }
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn token_masked() {
+        let e = "Telegram: https://api.telegram.org/bot123456:FAKE-token_x/getUpdates?timeout=25: Network Error";
+        assert_eq!(mask_token(e), "Telegram: https://api.telegram.org/bot***/getUpdates?timeout=25: Network Error");
+        assert_eq!(mask_token("no url here"), "no url here");
+        assert_eq!(mask_token("a /bot1:x b /bot2:y/z"), "a /bot*** b /bot***/z");
+    }
 }
