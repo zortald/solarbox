@@ -31,7 +31,9 @@ Telegram and a setup wizard in progress. UI and all user-facing text are in
 | `server/` | Rust (axum, tokio current_thread, rusqlite bundled). `src/*.rs`, UI embedded from `static/` |
 | `server/static/` | Dashboard: plain JS modules per page (`flow.js`, `stats.js`, …), own canvas chart `plot.js`, `core.js` = shared helpers (`SB.*`) |
 | `firmware/` | ESPHome configs. `gen-jk-ble.py` generates `jk-ble.yaml` (generic JK BMS board, N slots) |
-| `deploy/` | `build-router.sh` (armv5/armv7/arm64 images), `push-server.sh`, `push-ui.sh`, `push-config.sh`, RouterOS guide |
+| `deploy/` | `build-router.sh` (armv5/armv7/arm64/x86_64 images), `push-server.sh`, `push-ui.sh`, `push-config.sh`, CI build scripts, RouterOS guide |
+| `installer/`, `install/` | Installer CLI (Rust) and its one-line launchers |
+| `relay/` | Build relay (Cloudflare Worker) |
 | `docs/` | `setup-wizard.md` (design + status), this file; `ROADMAP.md` at the root |
 
 Key server modules: `energy.rs` (per-packet integration → `energy_daily`,
@@ -75,6 +77,12 @@ the same port as plain ingest), `router.rs` (RouterOS REST), `changes.rs`
   built → links, not yet → starts the build. Tests: `node --test relay/test.mjs`.
   Deploy: `cd relay && npx wrangler@4 deploy`; its GitHub token (fine-grained,
   this repo only, Actions read/write) is set with `npx wrangler@4 secret put GH_TOKEN`.
+- Installer: `installer/` (Rust CLI), built per OS on demand like the server
+  (`/v1/installer/<os-arch>`); launchers `install/install.sh` and
+  `install/install.ps1`, served by the relay as `/install.sh` and `/install.ps1`.
+  Test against RouterOS CHR in QEMU with `--router 127.0.0.1 --rest-port …
+  --ssh-port … --lan-ip <CHR's address> --solarbox-url …`; unattended runs:
+  `--user <login> --yes` with `SOLARBOX_ROUTER_PASSWORD`.
 - Verify a file: `openssl pkeyutl -verify -pubin -inkey <pem> -rawin -in <file> -sigfile <file>.sig`
   (the PEM is `deploy/signing-key.pub` with the ed25519 SPKI prefix).
 

@@ -155,4 +155,4 @@ current network under the constant key, then the generic image.
 - [ ] Bench: S3 end-to-end, emulated JK
 - [ ] Wizard wired to the real server, step by step
 - [ ] Self-update with rollback
-- [ ] Installer CLI + launch lines, tested on CHR
+- [x] Installer CLI + launch lines, tested on CHR (arm64, emulated); real routers next

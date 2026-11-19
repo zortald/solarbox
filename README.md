@@ -12,6 +12,20 @@ boards ──POST JSON──▶ /api/ingest ──▶ SQLite ──▶ dashboard
                                    /api/latest · /api/series · /api/catalog
 ```
 
+## Install
+
+On a computer in the same network as the MikroTik router (RouterOS 7.25+, a
+model with container support):
+
+```
+sh -c "$(curl -fsSL https://get.solarbox.workers.dev/install.sh)"   # macOS, Linux, Android (Termux)
+irm https://get.solarbox.workers.dev/install.ps1 | iex              # Windows (PowerShell)
+```
+
+The installer asks for the router's password (used for this run only), shows
+what it will add and asks before doing it. One step needs you at the router:
+RouterOS only enables containers after its power is cut once.
+
 ## Components
 
 | Dir          | What                                                             |
