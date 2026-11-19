@@ -175,9 +175,11 @@ fn err(code: StatusCode, msg: impl Into<String>) -> Response {
 pub async fn get(State(st): State<AppState>, h: HeaderMap) -> Response {
     let me = st.auth.user(&h).unwrap_or_default();
     let svc = st.access.service();
-    let status = match svc {
-        Some(c) => tokio::task::spawn_blocking(move || router::status(&c)).await.unwrap_or_else(|e| Err(e.to_string())),
-        None => Err(st.access.service_error.lock().unwrap().clone()
+    let reach = tokio::task::spawn_blocking(router::reachable).await.unwrap_or_else(|e| Err(e.to_string()));
+    let status = match (svc, reach) {
+        (_, Err(e)) => Err(e),
+        (Some(c), _) => tokio::task::spawn_blocking(move || router::status(&c)).await.unwrap_or_else(|e| Err(e.to_string())),
+        (None, _) => Err(st.access.service_error.lock().unwrap().clone()
             .map(|e| format!("служебный пользователь не создан: {e}"))
             .unwrap_or_else(|| "solarbox ещё не подключён к роутеру: войдите логином роутера или нажмите «Подключить»".into())),
     };
@@ -215,7 +217,12 @@ pub async fn get(State(st): State<AppState>, h: HeaderMap) -> Response {
                 "rules": s.rules.len(),
             });
         }
-        Err(e) => v["status_error"] = serde_json::json!(e),
+        Err(e) => {
+            if e.starts_with(router::UNREACHABLE) {
+                v["cmd_firewall"] = serde_json::json!(router::firewall_command());
+            }
+            v["status_error"] = serde_json::json!(e);
+        }
     }
     Json(v).into_response()
 }

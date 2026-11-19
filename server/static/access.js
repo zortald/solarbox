@@ -22,7 +22,8 @@
     const s = d.status, port = s?.open_port;
     const urls = s && port ? [s.public_ip && `https://${s.public_ip}:${port}`, s.ddns_name && `https://${s.ddns_name}:${port}`].filter(Boolean) : [];
     let state;
-    if (!s) state = `<p class="bad">${esc(d.status_error || 'роутер недоступен')}</p>`;
+    if (!s) state = `<p class="bad">${esc(d.status_error || 'роутер недоступен')}</p>` + (d.cmd_firewall ?
+      `<p class="small">Роутеру нужно одно правило: оно пускает solarbox только к REST роутера и больше никуда. Вставьте в терминал роутера (Winbox → New Terminal) и обновите страницу:</p><pre>${esc(d.cmd_firewall)}</pre>` : '');
     else if (port) state = `<p><span class="dot ok"></span><b>Открыт</b> — порт ${port}</p>` +
       urls.map((u) => `<div class="frow"><code>${esc(u)}</code><span></span><button class="btn xs" data-copy="${esc(u)}">Копировать</button></div>`).join('') +
       (s.ddns_name ? '<p class="muted small">Если IP у провайдера меняется, заходите по имени — оно не меняется.</p>' : '');
@@ -34,7 +35,7 @@
         <div class="row">
           ${s && !port && !s.grey ? '<button class="btn on" id="ac-open">Открыть доступ</button>' : ''}
           ${s && port ? '<button class="btn danger" id="ac-close">Закрыть доступ</button>' : ''}
-          ${!d.service ? '<button class="btn" id="ac-svc">Подключить к роутеру</button>' : ''}
+          ${!d.service && !d.cmd_firewall ? '<button class="btn" id="ac-svc">Подключить к роутеру</button>' : ''}
         </div>
         <p class="muted small">Изменения на роутере подтверждаются паролем роутера — он уходит роутеру один раз и нигде не сохраняется.
           Открытие включает IP Cloud (имя вида *.sn.mynetname.net) и добавляет одно правило NAT с комментарием <code>solarbox-access</code>; закрытие удаляет только его.</p>

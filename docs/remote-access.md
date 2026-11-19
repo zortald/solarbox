@@ -43,6 +43,15 @@ No external services, no Let's Encrypt, no extra passwords to remember.
 - Everything except `/api/ingest`, `/healthz` and the login page needs a
   session. No second factor.
 
+## Firewall
+
+The default MikroTik input chain drops everything not from the LAN list and
+the container's bridge is not in it, so the install adds one rule: the
+container may reach the router's REST port, nothing else (see
+`deploy/routeros.md`). Solarbox cannot add it itself — it needs REST to do
+so. When REST is unreachable, the login page says so and «Доступ» shows the
+exact command to paste.
+
 ## Service user on the router
 
 On the first successful router login Solarbox creates a router user `solarbox`

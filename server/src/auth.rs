@@ -169,7 +169,11 @@ impl Auth {
                 router::Check::Wrong => Ok(false),
                 router::Check::Unreachable(e) => {
                     eprintln!("[auth] router check for {user:?}: {e}");
-                    Err("роутер не ответил на проверку пароля".to_string())
+                    Err(if e.starts_with(router::UNREACHABLE) {
+                        "solarbox не может достучаться до роутера — скорее всего, фаервол роутера его не пускает. Войдите аварийным паролем (логин пустой) и откройте «Доступ»: там команда для роутера".to_string()
+                    } else {
+                        "роутер не ответил на проверку пароля. Войдите аварийным паролем (логин пустой)".to_string()
+                    })
                 }
             }
         };
@@ -341,7 +345,7 @@ pub async fn login(State(st): State<AppState>, ConnectInfo(addr): ConnectInfo<So
             let (code, msg) = match e {
                 LoginErr::Pause(s) => (StatusCode::TOO_MANY_REQUESTS, format!("слишком много попыток, подождите {s} с")),
                 LoginErr::Wrong => (StatusCode::UNAUTHORIZED, "неверный логин или пароль".to_string()),
-                LoginErr::Router(e) => (StatusCode::BAD_GATEWAY, format!("{e}. Войдите аварийным паролем (логин пустой)")),
+                LoginErr::Router(e) => (StatusCode::BAD_GATEWAY, e),
             };
             if fails > 0 {
                 eprintln!("[auth] failed login {:?} from {ip} ({fails} in a row)", user);

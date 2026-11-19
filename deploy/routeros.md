@@ -53,6 +53,19 @@ Do this **before** device-mode: any reboot cancels a pending device-mode update.
 
 The boards must be able to reach `<router-lan-ip>:8080` to push.
 
+Solarbox checks logins and opens remote access through the router's REST API.
+The default input firewall drops everything not from the LAN list, and
+`cont-br` is not in it, so let the container reach REST (port 80, service
+`www`) and nothing else:
+
+```
+/ip/firewall/filter/add chain=input action=accept protocol=tcp src-address=172.18.0.2 \
+    dst-address=172.18.0.1 dst-port=80 comment="solarbox: REST роутера" place-before=0
+```
+
+Don't add `cont-br` to the LAN list instead: that would open every router
+service (SSH, Winbox…) to a container that may face the internet.
+
 ## 4. Container
 
 RouterOS 7.25 syntax (`list=` / `mountlists=`):
@@ -75,9 +88,6 @@ once per device after comparing the fingerprint on the «Доступ» page; pl
 an empty login and the emergency password. Boards keep pushing over plain HTTP
 to the same port. Health `/healthz` (both). Details: `docs/remote-access.md`.
 
-Solarbox checks logins against the router's REST API on its gateway
-(`172.18.0.1`, service `www`); the router's firewall must let the container
-reach it.
 
 ## Updating
 

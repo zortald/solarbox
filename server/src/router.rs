@@ -56,8 +56,31 @@ pub fn login(user: &str, pw: &str) -> Check {
         },
         Err(ureq::Error::Status(401, _)) => Check::Wrong,
         Err(ureq::Error::Status(code, _)) => Check::Unreachable(format!("роутер ответил HTTP {code}")),
-        Err(e) => Check::Unreachable(format!("роутер не отвечает: {e}")),
+        Err(e) => Check::Unreachable(format!("{UNREACHABLE}: {e}")),
     }
+}
+
+/// No connection at all. On a default MikroTik config this is the input
+/// firewall: the container's bridge is not in the LAN list.
+pub const UNREACHABLE: &str = "solarbox не может достучаться до REST роутера — фаервол роутера не пускает контейнер или выключен сервис www";
+
+/// Can we reach the REST API at all (any HTTP answer counts)?
+pub fn reachable() -> Result<(), String> {
+    let b = base().ok_or("адрес роутера неизвестен")?;
+    match agent().get(&format!("{b}/rest/system/identity")).call() {
+        Ok(_) | Err(ureq::Error::Status(..)) => Ok(()),
+        Err(e) => Err(format!("{UNREACHABLE}: {e}")),
+    }
+}
+
+/// The one firewall rule the router needs for Solarbox: this container may
+/// reach the router's REST API, nothing else.
+pub fn firewall_command() -> Option<String> {
+    let b = base()?;
+    let hp = b.split("://").nth(1)?.split('/').next()?;
+    let (host, port) = hp.split_once(':').unwrap_or((hp, "80"));
+    let own = own_ip()?;
+    Some(format!("/ip/firewall/filter/add chain=input action=accept protocol=tcp src-address={own} dst-address={host} dst-port={port} comment=\"solarbox: REST роутера\" place-before=0"))
 }
 
 // ---- REST calls with given credentials ----------------------------------------
@@ -88,7 +111,7 @@ pub fn call(method: &str, path: &str, c: &Cred, body: Option<serde_json::Value>)
             let msg = [v.get("detail"), v.get("message")].into_iter().flatten().filter_map(|x| x.as_str()).next().unwrap_or("").to_string();
             Err(format!("роутер: HTTP {code} {msg}").trim().to_string())
         }
-        Err(e) => Err(format!("роутер не отвечает: {e}")),
+        Err(e) => Err(format!("{UNREACHABLE}: {e}")),
     }
 }
 
