@@ -115,6 +115,21 @@ fn read_state(ros: &Ros) -> State {
     }
 }
 
+/// Best effort: the system's way to open a link.
+fn open_browser(url: &str) -> bool {
+    use std::process::{Command, Stdio};
+    let cmds: &[(&str, &[&str])] = if cfg!(target_os = "macos") {
+        &[("open", &[])]
+    } else if cfg!(windows) {
+        &[("cmd", &["/C", "start", ""])]
+    } else if cfg!(target_os = "android") {
+        &[("termux-open-url", &[])]
+    } else {
+        &[("xdg-open", &[])]
+    };
+    cmds.iter().any(|(c, pre)| Command::new(c).args(*pre).arg(url).stdout(Stdio::null()).stderr(Stdio::null()).status().map(|s| s.success()).unwrap_or(false))
+}
+
 #[tokio::main(flavor = "current_thread")]
 async fn main() {
     let a = args();
@@ -356,11 +371,23 @@ async fn main() {
     let find = |key: &str| log.iter().rev().find_map(|m| s(m, "message").split(key).nth(1).map(|x| x.trim().to_string()));
     step("Готово");
     info(&format!("Solarbox работает: https://{lan}:8080"));
+    // One-time first-run link: straight into the setup wizard, no password.
+    if let Some(path) = find("first-run link (one use, 1 h):") {
+        let link = format!("https://{lan}:8080{path}");
+        println!();
+        info("Дальше — мастер настройки. Ссылка для входа без пароля (одна, на час):");
+        info(&format!("  {link}"));
+        if open_browser(&link) {
+            info("Открываю её в браузере…");
+        }
+        info("Не успели — входите логином и паролем роутера.");
+        println!();
+    }
     info("Браузер предупредит о сертификате — он свой, самоподписанный. Сверьте отпечаток и подтвердите:");
     if let Some(fp) = find("certificate SHA-256") {
         info(&format!("  {fp}"));
     }
-    info("Входите логином и паролем роутера. Дальше Solarbox сам проведёт по настройке.");
+    info("Потом входите логином и паролем роутера.");
     if let Some(p) = find("(empty user name, also in /data/admin-password):") {
         println!();
         info(&format!("Аварийный пароль Solarbox (вход с пустым логином): {p}"));

@@ -75,7 +75,11 @@ wiring SVG, settings panel) and their images in `/data/fw/<driver>-<chip>.bin`
 9. Done → the emergency password is shown once, to write down.
 
 Login is the router's own (as for the dashboard); there is no separate admin
-password step. The wizard opens by itself while there are no boards and it was
+password step. Right after the install nobody types anything: a fresh
+Solarbox (no boards, wizard not finished) puts a one-time link token in its
+log (`[setup] first-run link`, valid 1 h, memory only, new on restart); the
+installer reads it from the router's log, shows `https://<router>:8080/start?t=…`
+and opens it. The link logs in once and lands in the wizard. The wizard opens by itself while there are no boards and it was
 not finished or skipped; later it is in Settings. `?demo` keeps the simulated
 mode (fake boards and BMS, nothing saved or sent) for headless checks.
 

@@ -168,6 +168,11 @@ async fn main() {
         }
     }
     state.autom.attach_db(db.clone());
+    // A fresh Solarbox: a one-time link for whoever just installed it (the
+    // installer reads it from the router's log).
+    if state.wizard.get().state == "new" && state.config.get().boards.is_empty() {
+        eprintln!("[setup] first-run link (one use, 1 h): /start?t={}", state.auth.arm_setup());
+    }
     telegram::spawn_bot(state.clone());
     access::spawn_watch(state.clone());
     {
@@ -263,6 +268,7 @@ async fn main() {
         .route("/api/admin/check", post(boards::admin_check))
         .route("/api/login", post(auth::login))
         .route("/api/logout", post(auth::logout))
+        .route("/start", get(auth::start))
         .route("/api/logout-all", post(auth::logout_all))
         .route("/api/me", get(auth::me))
         .route("/api/access", get(access::get))

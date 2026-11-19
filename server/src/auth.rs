@@ -6,7 +6,7 @@
 
 use crate::{now, router, AppState};
 use axum::{
-    extract::{ConnectInfo, Json, Request, State},
+    extract::{Query, ConnectInfo, Json, Request, State},
     http::{header, HeaderMap, StatusCode},
     middleware::Next,
     response::{IntoResponse, Redirect, Response},
@@ -56,7 +56,12 @@ pub struct Auth {
     sessions: Mutex<Vec<Session>>,
     fails: Mutex<HashMap<IpAddr, Fail>>,
     emergency: String,
+    /// First-run link: hash of a one-time token and when it expires.
+    setup: Mutex<Option<(String, i64)>>,
 }
+
+/// How long the first-run link works.
+const SETUP_TTL: i64 = 3_600;
 
 pub enum LoginErr {
     /// Too many failures: wait this many seconds.
@@ -98,7 +103,7 @@ impl Auth {
                 }
             }
         };
-        Auth { path, sessions: Mutex::new(sessions), fails: Mutex::new(HashMap::new()), emergency }
+        Auth { path, sessions: Mutex::new(sessions), fails: Mutex::new(HashMap::new()), emergency, setup: Mutex::new(None) }
     }
 
     fn save(&self, list: &[Session]) {
@@ -180,28 +185,54 @@ impl Auth {
         match ok {
             Ok(true) => {
                 self.fails.lock().unwrap().remove(&ip);
-                let token = random_hex(32);
-                let s = Session {
-                    hash: sha256_hex(token.as_bytes()),
-                    user: user.to_string(),
-                    created: t,
-                    seen: t,
-                    ip: ip.to_string(),
-                    ua: ua.chars().take(200).collect(),
-                    saved_seen: t,
-                };
-                let mut list = self.sessions.lock().unwrap();
-                list.retain(|s| t - s.seen < SESSION_TTL);
-                list.push(s);
-                let snapshot = list.clone();
-                drop(list);
-                self.save(&snapshot);
-                Ok(token)
+                Ok(self.open_session(user, ip, ua))
             }
             Ok(false) => Err((LoginErr::Wrong, self.failed(ip, t))),
             // Not counted as a failure: the password was not even checked.
             Err(e) => Err((LoginErr::Router(e), 0)),
         }
+    }
+
+    fn open_session(&self, user: &str, ip: IpAddr, ua: &str) -> String {
+        let t = now();
+        let token = random_hex(32);
+        let s = Session {
+            hash: sha256_hex(token.as_bytes()),
+            user: user.to_string(),
+            created: t,
+            seen: t,
+            ip: ip.to_string(),
+            ua: ua.chars().take(200).collect(),
+            saved_seen: t,
+        };
+        let mut list = self.sessions.lock().unwrap();
+        list.retain(|s| t - s.seen < SESSION_TTL);
+        list.push(s);
+        let snapshot = list.clone();
+        drop(list);
+        self.save(&snapshot);
+        token
+    }
+
+    /// A fresh Solarbox: a one-time link token for the person who just
+    /// installed it (the installer reads it from the router's log), valid
+    /// for an hour. Kept in memory only; a restart makes a new one.
+    pub fn arm_setup(&self) -> String {
+        let token = random_hex(16);
+        *self.setup.lock().unwrap() = Some((sha256_hex(token.as_bytes()), now() + SETUP_TTL));
+        token
+    }
+
+    /// Spend the first-run token: a session (as with the emergency password).
+    pub fn use_setup(&self, token: &str, ip: IpAddr, ua: &str) -> Option<String> {
+        let mut g = self.setup.lock().unwrap();
+        let (hash, until) = g.as_ref()?;
+        if now() > *until || !ct_eq(sha256_hex(token.as_bytes()).as_bytes(), hash.as_bytes()) {
+            return None;
+        }
+        *g = None;
+        drop(g);
+        Some(self.open_session("", ip, ua))
     }
 
     pub fn logout(&self, h: &HeaderMap) {
@@ -291,7 +322,7 @@ pub fn browser(ua: &str) -> String {
 
 /// Paths reachable without a session.
 fn open_path(p: &str) -> bool {
-    matches!(p, "/api/ingest" | "/healthz" | "/login.html" | "/api/login" | "/api/logout" | "/style.css" | "/manifest.webmanifest")
+    matches!(p, "/api/ingest" | "/healthz" | "/login.html" | "/api/login" | "/api/logout" | "/start" | "/style.css" | "/manifest.webmanifest")
         || (p.starts_with("/icon-") && p.ends_with(".png"))
 }
 
@@ -358,6 +389,27 @@ pub async fn login(State(st): State<AppState>, ConnectInfo(addr): ConnectInfo<So
     }
 }
 
+#[derive(Deserialize)]
+pub struct StartQ {
+    #[serde(default)]
+    t: String,
+}
+
+/// GET /start?t=… — the installer's first-run link: in without a password,
+/// once, within the hour; otherwise the login page.
+pub async fn start(State(st): State<AppState>, ConnectInfo(addr): ConnectInfo<SocketAddr>, h: HeaderMap, Query(q): Query<StartQ>) -> Response {
+    let ip = addr.ip().to_canonical();
+    let ua = h.get(header::USER_AGENT).and_then(|v| v.to_str().ok()).unwrap_or("").to_string();
+    match st.auth.use_setup(&q.t, ip, &ua) {
+        Some(token) => {
+            eprintln!("[auth] first-run link used from {ip}");
+            crate::access::notify(&st, format!("🔑 Вход в solarbox по ссылке установки\nIP {ip}, {}", browser(&ua)));
+            ([set_cookie(&token, SESSION_TTL)], Redirect::to("/wizard.html")).into_response()
+        }
+        None => Redirect::to("/login.html").into_response(),
+    }
+}
+
 pub async fn logout(State(st): State<AppState>, h: HeaderMap) -> Response {
     st.auth.logout(&h);
     ([set_cookie("", 0)], Json(serde_json::json!({ "ok": true }))).into_response()
@@ -402,6 +454,22 @@ mod tests {
         let a = Auth::open(&d);
         assert_eq!(a.emergency.len(), 16);
         assert_eq!(Auth::open(&d).emergency, a.emergency);
+    }
+
+    #[test]
+    fn first_run_link_once_and_only_its_token() {
+        let d = std::env::temp_dir().join(format!("sb-setup-{}", std::process::id()));
+        let _ = std::fs::create_dir_all(&d);
+        std::fs::write(d.join("admin-password"), "secret").unwrap();
+        let a = Auth::open(&d);
+        let ip: IpAddr = "10.0.0.2".parse().unwrap();
+        assert!(a.use_setup("anything", ip, "").is_none()); // nothing armed
+        let t = a.arm_setup();
+        assert!(a.use_setup("wrong", ip, "").is_none());
+        let s = a.use_setup(&t, ip, "").expect("session");
+        assert_eq!(a.user(&hdr("cookie", &format!("{COOKIE}={s}"))).as_deref(), Some(""));
+        assert!(a.use_setup(&t, ip, "").is_none()); // spent
+        let _ = std::fs::remove_dir_all(&d);
     }
 
     #[test]
