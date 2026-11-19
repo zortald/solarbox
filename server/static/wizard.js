@@ -389,7 +389,8 @@
     // A board in the router's USB is flashed from there; the download is the
     // spare way («прошить с компьютера»).
     const fwBox = b.usb && usbTarget(b) && !pcFlash[i] ? usbBox(b, i) : have
-      ? `<div class="wzfw"><div><b>Прошивка для этой платы</b><small class="muted"><code>solarbox-firmware-${t}.bin</code> — собирается один раз для всех таких плат, потом сразу</small></div>
+      ? `<div class="wzfw"><div><b>Прошивка для этой платы</b><small class="muted"><code>solarbox-firmware-${t}.bin</code> — собирается один раз для всех таких плат, потом сразу</small>
+          ${b.usb && usbTarget(b) ? `<small><a href="#" data-routerflash="${i}">← прошить с роутера</a> — плата воткнута в его USB</small>` : ''}</div>
           <button class="btn on" data-fw="${i}">Скачать прошивку</button></div>`
       : `<div class="wzfw warn"><div><b>Прошивки для такой платы пока нет</b><small>${b.inv ? 'Драйвер инвертора PI30 ещё в работе — плата для инвертора пока не прошивается из Solarbox.' : 'Такое сочетание платы и числа BMS не собирается.'}
           Можно пройти мастер дальше без неё («Подключу позже») и подключить её, когда прошивка появится.</small></div></div>`;
@@ -1011,6 +1012,7 @@
       pollUsb();
     }));
     body.querySelectorAll('[data-pcflash]').forEach((el) => (el.onclick = (e) => { e.preventDefault(); pcFlash[+el.dataset.pcflash] = true; render(); }));
+    body.querySelectorAll('[data-routerflash]').forEach((el) => (el.onclick = (e) => { e.preventDefault(); delete pcFlash[+el.dataset.routerflash]; render(); }));
     body.querySelectorAll('[data-usbflash]').forEach((el) => (el.onclick = () => usbFlash(+el.dataset.usbflash)));
     body.querySelectorAll('[data-usbwifi]').forEach((el) => (el.onclick = () => usbWifi(+el.dataset.usbwifi, el)));
     body.querySelectorAll('[data-later]').forEach((el) => (el.onclick = () => { const i = +el.dataset.later; W.boards[i] = Object.assign(W.boards[i] || {}, { later: !W.boards[i]?.later }); render(); }));
