@@ -16,7 +16,7 @@ jobs:
 
   # Static musl server binary for every router/box architecture. armv5 =
   # EN7562CT routers (catches crypto backends that don't build there). mips is
-  # tier 3 in Rust (no prebuilt std): nightly + build-std, an experiment.
+  # tier 3 in Rust (no prebuilt std): nightly + build-std + zig, an experiment.
   cross:
     runs-on: ubuntu-latest
     continue-on-error: ${{ matrix.experimental }}
@@ -34,13 +34,18 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: build
+        if: ${{ !matrix.experimental }}
+        run: docker run --rm -v "$PWD/server":/src -w /src messense/rust-musl-cross:${{ matrix.tool }} cargo build --release
+      # mips: nightly on the runner, zig as the cross C compiler and linker.
+      - uses: dtolnay/rust-toolchain@nightly
+        if: ${{ matrix.experimental }}
+        with: { components: rust-src }
+      - name: build (nightly + build-std)
+        if: ${{ matrix.experimental }}
+        working-directory: server
         run: |
-          if [ "${{ matrix.experimental }}" = true ]; then
-            CMD="rustup toolchain install nightly --profile minimal --component rust-src && cargo +nightly build --release -Zbuild-std=std,panic_abort --target ${{ matrix.target }}"
-          else
-            CMD="cargo build --release"
-          fi
-          docker run --rm -v "$PWD/server":/src -w /src messense/rust-musl-cross:${{ matrix.tool }} sh -c "$CMD"
+          pip install -q ziglang cargo-zigbuild
+          cargo zigbuild --release -Zbuild-std=std,panic_abort --target ${{ matrix.target }}
       - name: size
         run: ls -l server/target/${{ matrix.target }}/release/solarbox && file server/target/${{ matrix.target }}/release/solarbox
 
