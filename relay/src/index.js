@@ -10,6 +10,7 @@
 //   → { status: "building", version, run }      poll again in ~15 s
 //   → { status: "failed", version, run }        the last build for it failed
 //   → 400 { error } / 404 { error } / 502 { error }
+//   GET /install.sh, /install.ps1   the launchers, from install/ on main
 
 export const KINDS = {
   server: ['armv5', 'armv7', 'arm64', 'x86_64', 'mips', 'mipsel'],
@@ -113,6 +114,11 @@ export default {
   async fetch(req, env, ctx) {
     const url = new URL(req.url);
     if (req.method !== 'GET') return json(405, { error: 'GET only' });
+    if (url.pathname === '/install.sh' || url.pathname === '/install.ps1') {
+      const r = await fetch(`https://raw.githubusercontent.com/${env.REPO}/main/install${url.pathname}`, { cf: { cacheTtl: 300 } });
+      if (!r.ok) return json(502, { error: `launcher: ${r.status}` });
+      return new Response(r.body, { headers: { 'content-type': 'text/plain; charset=utf-8', 'cache-control': 'public, max-age=300' } });
+    }
     const m = url.pathname.match(/^\/v1\/([a-z]+)\/([a-z0-9_-]+)$/);
     if (!m) return json(404, { error: 'unknown path' });
 
