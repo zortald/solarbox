@@ -18,4 +18,4 @@
 # per-site deploy settings
 /deploy/local.env
 /deploy/site-config.json
-
+/firmware/site/
