@@ -144,10 +144,25 @@ Checked on RouterOS CHR 7.25.1 (arm64, QEMU with the ESP32-S3 passed through):
 - from inside, esptool put the chip into its bootloader by itself (RTS/DTR,
   no BOOT button), loaded the stub and reset it back.
 
-Not checked yet: CH340/CP210x boards (D1 mini, ESP32 DevKit), a real
-MikroTik's USB (power for the board, other kernels), what changing `devices`
-does to a running container (a container got "Exec format error" after it on
-CHR — to find out). OpenWrt and Docker see the port directly.
+Checked on a real hAP ax S (EN7562CT, RouterOS 7.25, the site-1 model):
+- the ESP32-S3 in its USB-A shows up as `usb1`, device `1-2`; with
+  `devices=1-2` the container gets `/dev/ttyACM0`;
+- espflash (Rust, built for armv5te musl like the server) read the chip and
+  wrote the signed `s3-jk2` factory image from inside the container, entering
+  the bootloader by itself: ≈17 s; the board came back on Wi-Fi by itself
+  (its Wi-Fi lives in NVS, which the factory image doesn't touch);
+- third-party armv5 binaries may not run (a prebuilt busybox died with
+  "Illegal instruction"): build what runs there ourselves;
+- SSH on a router that still has its factory password first asks to change
+  it; Ctrl-C skips that and leaves the password as it is (the installer must
+  do the same).
+
+Not checked yet: CH340/CP210x boards (D1 mini, ESP32 DevKit); a board plugged
+in after the container started, and `devices` set while nothing is plugged
+in (can the installer reserve the router's USB port up front?); what
+changing `devices` does to a running container (a container got "Exec format
+error" after it on CHR — to find out). OpenWrt and Docker see the port
+directly.
 
 Restart policy: `on-failure` without an interval restarts at once forever
 (seen: thousands of restarts flooding the log); the installer sets 10 s.
