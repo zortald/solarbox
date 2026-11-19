@@ -1,0 +1,72 @@
+# On-demand build: one artifact for one release, started by the build Worker
+# (or by hand). Already in the release → nothing to do. Otherwise build, sign
+# (ed25519, SB_SIGNING_KEY; public key in deploy/signing-key.pub) and upload
+# to the release, creating the release from the tag if needed.
+# The run name is what the Worker matches to see a build already running.
+name: build
+run-name: build ${{ inputs.kind }} ${{ inputs.arch }} ${{ inputs.version }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      kind:
+        type: choice
+        options: [server]
+      arch:
+        type: choice
+        options: [armv5, armv7, arm64, x86_64, mips, mipsel]
+      version:
+        description: release tag, e.g. v0.1.0
+        required: true
+
+concurrency:
+  group: build-${{ inputs.kind }}-${{ inputs.arch }}-${{ inputs.version }}
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+      TAG: ${{ inputs.version }}
+      ASSET: solarbox-${{ inputs.kind }}-${{ inputs.arch }}
+    steps:
+      - name: already built?
+        id: have
+        run: |
+          if gh release view "$TAG" -R "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name' 2>/dev/null | grep -qx "$ASSET.sig"; then
+            echo "done=true" >> "$GITHUB_OUTPUT"; echo "$ASSET is in $TAG already"
+          fi
+      - uses: actions/checkout@v4
+        if: ${{ !steps.have.outputs.done }}
+        with: { ref: "${{ inputs.version }}" }
+      - uses: dtolnay/rust-toolchain@nightly
+        if: ${{ !steps.have.outputs.done && startsWith(inputs.arch, 'mips') }}
+        with: { components: rust-src }
+      - name: zig for mips
+        if: ${{ !steps.have.outputs.done && startsWith(inputs.arch, 'mips') }}
+        run: pip install -q ziglang cargo-zigbuild
+      - name: build
+        if: ${{ !steps.have.outputs.done }}
+        run: ./deploy/ci-build-server.sh "${{ inputs.arch }}" dist
+      - name: sign
+        if: ${{ !steps.have.outputs.done }}
+        env:
+          KEY: ${{ secrets.SB_SIGNING_KEY }}
+        run: |
+          [ -n "$KEY" ] || { echo "SB_SIGNING_KEY is not set"; exit 1; }
+          printf '%s\n' "$KEY" > "$RUNNER_TEMP/key.pem"
+          for f in dist/*; do
+            openssl pkeyutl -sign -inkey "$RUNNER_TEMP/key.pem" -rawin -in "$f" -out "$f.sig"
+          done
+          rm "$RUNNER_TEMP/key.pem"
+          ls -l dist
+      - name: upload
+        if: ${{ !steps.have.outputs.done }}
+        run: |
+          gh release view "$TAG" >/dev/null 2>&1 || gh release create "$TAG" --verify-tag --title "$TAG" --notes "" || gh release view "$TAG" >/dev/null
+          # The signature last: its presence means the artifact is complete.
+          gh release upload "$TAG" $(ls dist/* | grep -v '\.sig$') --clobber
+          gh release upload "$TAG" dist/*.sig --clobber

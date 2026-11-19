@@ -14,40 +14,26 @@ jobs:
       - run: cargo test --release
         working-directory: server
 
-  # Static musl server binary for every router/box architecture. armv5 =
-  # EN7562CT routers (catches crypto backends that don't build there). mips is
-  # tier 3 in Rust (no prebuilt std): nightly + build-std + zig, an experiment.
+  # Static musl server binary for every router/box architecture, the same
+  # script on-demand builds use. armv5 = EN7562CT routers (catches crypto
+  # backends that don't build there); mips is an experiment (see the script).
   cross:
     runs-on: ubuntu-latest
-    continue-on-error: ${{ matrix.experimental }}
+    continue-on-error: ${{ startsWith(matrix.arch, 'mips') }}
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - { tool: armv5te-musleabi, target: armv5te-unknown-linux-musleabi, experimental: false }
-          - { tool: armv7-musleabihf, target: armv7-unknown-linux-musleabihf, experimental: false }
-          - { tool: aarch64-musl, target: aarch64-unknown-linux-musl, experimental: false }
-          - { tool: x86_64-musl, target: x86_64-unknown-linux-musl, experimental: false }
-          - { tool: mips-musl, target: mips-unknown-linux-musl, experimental: true }
-          - { tool: mipsel-musl, target: mipsel-unknown-linux-musl, experimental: true }
-    name: cross (${{ matrix.target }})
+        arch: [armv5, armv7, arm64, x86_64, mips, mipsel]
+    name: cross (${{ matrix.arch }})
     steps:
       - uses: actions/checkout@v4
-      - name: build
-        if: ${{ !matrix.experimental }}
-        run: docker run --rm -v "$PWD/server":/src -w /src messense/rust-musl-cross:${{ matrix.tool }} cargo build --release
-      # mips: nightly on the runner, zig as the cross C compiler and linker.
       - uses: dtolnay/rust-toolchain@nightly
-        if: ${{ matrix.experimental }}
+        if: ${{ startsWith(matrix.arch, 'mips') }}
         with: { components: rust-src }
-      - name: build (nightly + build-std)
-        if: ${{ matrix.experimental }}
-        working-directory: server
-        run: |
-          pip install -q ziglang cargo-zigbuild
-          cargo zigbuild --release -Zbuild-std=std,panic_abort --target ${{ matrix.target }}
-      - name: size
-        run: ls -l server/target/${{ matrix.target }}/release/solarbox && file server/target/${{ matrix.target }}/release/solarbox
+      - name: zig for mips
+        if: ${{ startsWith(matrix.arch, 'mips') }}
+        run: pip install -q ziglang cargo-zigbuild
+      - run: ./deploy/ci-build-server.sh ${{ matrix.arch }} dist
 
   # One board image through the official ESPHome build action (the path
   # on-demand builds will take).
