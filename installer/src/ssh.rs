@@ -45,9 +45,16 @@ impl Ssh {
         ch.request_pty(false, "dumb", 200, 24, 0, 0, &[]).await.map_err(|e| e.to_string())?;
         ch.exec(true, cmd).await.map_err(|e| e.to_string())?;
         let mut buf = String::new();
+        let mut skipped = false;
         while let Some(msg) = ch.wait().await {
             if let ChannelMsg::Data { data } | ChannelMsg::ExtendedData { data, .. } = msg {
                 buf.push_str(&String::from_utf8_lossy(&data));
+                // A router still on its factory password asks to change it
+                // before running anything: skip (Ctrl-C), the password stays.
+                if !skipped && buf.contains("Change your password") {
+                    skipped = true;
+                    let _ = ch.data(&b"\x03"[..]).await;
+                }
                 while let Some(i) = buf.find(['\r', '\n']) {
                     let l: String = buf.drain(..=i).collect();
                     let l = clean(&l);

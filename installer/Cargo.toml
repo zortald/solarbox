@@ -18,6 +18,7 @@ ring = "0.17"
 base64 = "0.22"
 rpassword = "7"
 netdev = "0.47"
+socket2 = { version = "0.5", features = ["all"] }
 
 [profile.release]
 opt-level = "z"

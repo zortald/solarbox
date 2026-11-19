@@ -10,6 +10,7 @@
 //!   --rest-port <p> --ssh-port <p> --lan-ip <router's LAN address> --solarbox-url <url>
 
 mod fetch;
+mod mndp;
 mod ros;
 mod ssh;
 
@@ -25,6 +26,7 @@ const VETH: &str = "veth-sb";
 const BRIDGE: &str = "cont-br";
 const CT_IP: &str = "172.18.0.2";
 const GW_IP: &str = "172.18.0.1";
+const CT_NET: &str = "172.18.0.0/24";
 /// RouterOS answers "too many unsuccessful attempts" from this count on.
 const MAX_ATTEMPTS: u32 = 3;
 
@@ -87,6 +89,42 @@ fn args() -> Args {
     a
 }
 
+/// MikroTik routers in this network (MNDP); the owner picks one, or types an
+/// address. Default: this computer's gateway when it is among them.
+fn pick_router(unattended: bool) -> String {
+    info("Ищу роутеры MikroTik в сети…");
+    let found = mndp::scan(Duration::from_millis(2500));
+    let gw = gateway().unwrap_or_default();
+    let def = found.iter().position(|r| r.ip == gw).unwrap_or(0);
+    if found.is_empty() {
+        if unattended && !gw.is_empty() {
+            return gw;
+        }
+        info("Не нашёл (обнаружение MikroTik может быть выключено).");
+        return match ask(&format!("  Адрес роутера [{gw}]: ")) {
+            x if x.is_empty() => gw,
+            x => x,
+        };
+    }
+    for (i, r) in found.iter().enumerate() {
+        info(&format!("{}. {}  «{}» · {} · RouterOS {}", i + 1, r.ip, r.identity, r.board, r.version));
+    }
+    if unattended {
+        return found[def].ip.clone();
+    }
+    loop {
+        let x = ask(&format!("  Номер роутера или его адрес [{}]: ", def + 1));
+        if x.is_empty() {
+            return found[def].ip.clone();
+        }
+        match x.parse::<usize>() {
+            Ok(n) if (1..=found.len()).contains(&n) => return found[n - 1].ip.clone(),
+            Ok(_) => info("Нет такого номера."),
+            Err(_) => return x,
+        }
+    }
+}
+
 /// This computer's default gateway — normally the site router.
 fn gateway() -> Option<String> {
     netdev::get_default_gateway().ok()?.ipv4.first().map(|ip| ip.to_string())
@@ -137,13 +175,9 @@ async fn main() {
     println!("Пароль роутера нужен только на время установки и нигде не сохраняется.");
 
     step("Роутер");
-    let host = a.router.clone().or_else(gateway).unwrap_or_default();
-    let host = match a.router.is_some() || a.yes {
-        true => host,
-        false => match ask(&format!("  Адрес роутера [{host}]: ")) {
-            x if x.is_empty() => host,
-            x => x,
-        },
+    let host = match a.router.clone() {
+        Some(h) => h,
+        None => pick_router(a.yes),
     };
     if host.is_empty() {
         fail("не знаю адрес роутера — укажите его");
@@ -209,6 +243,13 @@ async fn main() {
         info("Пароль задан. Запишите его — это пароль самого роутера.");
     }
 
+    // The router's USB controller: passed whole, so any board plugged in later
+    // reaches Solarbox (devices can only name what is present; the controller
+    // always is). Never anything else from this list (the Wi-Fi chips are PCI).
+    let usb: Option<String> = ros.list("/system/resource/hardware").unwrap_or_default().iter()
+        .find(|h| s(h, "type") == "usb" && s(h, "name").contains("Host Controller"))
+        .map(|h| s(h, "device-name").to_string());
+
     // ---- the plan ----
     step("Что будет сделано");
     let mut n = 0;
@@ -225,6 +266,10 @@ async fn main() {
     item(&format!("Скачать Solarbox под {arch}, проверить подпись и загрузить на роутер (≈4 МБ)."));
     item(&format!("Сеть для контейнера: {VETH} {CT_IP}, мост {BRIDGE} {GW_IP}; порт 8080 на {lan} → Solarbox."));
     item("Правило фаервола: контейнеру можно обращаться к REST роутера (порт 80), больше никуда.");
+    item(&format!("Выход контейнера в интернет через роутер (маскарадинг {CT_NET}) — за обновлениями и прошивками плат."));
+    if let Some(u) = &usb {
+        item(&format!("USB роутера ({u}) — Solarbox: воткнутую плату он прошьёт сам. Другие USB-устройства роутера (флешка, модем) при этом могут перестать работать."));
+    }
     item(&format!("Контейнер «{NAME}» с данными в /sb-data, запуск при загрузке роутера."));
     println!();
     info("Ваши настройки, правила и пользователи роутера не меняются, только добавляется перечисленное.");
@@ -331,6 +376,11 @@ async fn main() {
         }
         ok(ros.add("/ip/firewall/filter", r), "правило фаервола");
     }
+    ok(
+        ros.ensure("/ip/firewall/nat", "?comment=solarbox: в интернет",
+            json!({ "chain": "srcnat", "action": "masquerade", "src-address": CT_NET, "comment": "solarbox: в интернет" })),
+        "выход в интернет",
+    );
     info("готово");
 
     // ---- 5. container ----
@@ -338,6 +388,9 @@ async fn main() {
     ok(ros.ensure("/container/mounts", "?list=sb-data", json!({ "list": "sb-data", "src": "/sb-data", "dst": "/data" })), "папка данных");
     let mut c = json!({ "file": FILE, "interface": VETH, "root-dir": "sb-root", "mountlists": "sb-data",
                         "logging": "yes", "start-on-boot": "yes", "name": NAME, "restart-policy": "on-failure", "restart-interval": "10s" });
+    if let Some(u) = &usb {
+        c["devices"] = json!(u);
+    }
     if ros.add("/container", c.clone()).is_err() {
         // Older 7.x without restart policies.
         let o = c.as_object_mut().unwrap();
