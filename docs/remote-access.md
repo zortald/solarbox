@@ -55,7 +55,7 @@ exact command to paste.
 ## Service user on the router
 
 On the first successful router login Solarbox creates a router user `solarbox`
-(group `solarbox-read`: `read,rest-api`, no `sensitive`) with a random password
+(group `solarbox-read`: `read,api,rest-api` — REST logs in through the API internally — no `sensitive`, allowed only from the container's address) with a random password
 kept in `/data/router.json`. It cannot change anything and cannot see secrets.
 Used for: the daily session check, the public IP (every 5 min), the access
 status (NAT rule present, public vs CGNAT address). Not removed when access is

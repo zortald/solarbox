@@ -138,6 +138,7 @@ pub fn own_ip() -> Option<std::net::IpAddr> {
 
 pub const SERVICE_USER: &str = "solarbox";
 const SERVICE_GROUP: &str = "solarbox-read";
+const SERVICE_POLICY: &str = "read,api,rest-api";
 /// NAT rules made by «Доступ» carry this comment (the LAN rule from the
 /// install guide is plain "solarbox" and is never touched).
 pub const NAT_COMMENT: &str = "solarbox-access";
@@ -145,10 +146,16 @@ pub const NAT_COMMENT: &str = "solarbox-access";
 /// Create (or reset) the read-only service user with `pw`, using a person's
 /// credentials. Allowed only from this container's address.
 pub fn ensure_service_user(admin: &Cred, pw: &str) -> Result<(), String> {
-    if list(&format!("/user/group?name={SERVICE_GROUP}"), admin)?.is_empty() {
-        call("PUT", "/user/group", admin, Some(serde_json::json!({
-            "name": SERVICE_GROUP, "policy": "read,rest-api", "comment": "solarbox: только чтение",
-        })))?;
+    // REST logs in through the API internally, so it needs `api` as well as
+    // `rest-api` (without it: "not allowed (9)").
+    let g = serde_json::json!({ "policy": SERVICE_POLICY, "comment": "solarbox: только чтение" });
+    match list(&format!("/user/group?name={SERVICE_GROUP}"), admin)?.first() {
+        Some(x) => { call("PATCH", &format!("/user/group/{}", s(x, ".id")), admin, Some(g))?; }
+        None => {
+            let mut g = g;
+            g["name"] = serde_json::json!(SERVICE_GROUP);
+            call("PUT", "/user/group", admin, Some(g))?;
+        }
     }
     let mut u = serde_json::json!({ "group": SERVICE_GROUP, "password": pw, "disabled": "false" });
     if let Some(ip) = own_ip() {
