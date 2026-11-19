@@ -64,10 +64,12 @@ struct Args {
     url: Option<String>,
     user: Option<String>,
     yes: bool,
+    /// Only log in over SSH and run a harmless command (diagnostics).
+    ssh_check: bool,
 }
 
 fn args() -> Args {
-    let mut a = Args { router: None, rest_port: 80, ssh_port: 22, lan_ip: None, url: None, user: None, yes: false };
+    let mut a = Args { router: None, rest_port: 80, ssh_port: 22, lan_ip: None, url: None, user: None, yes: false, ssh_check: false };
     let mut it = std::env::args().skip(1);
     while let Some(k) = it.next() {
         let mut v = || it.next().unwrap_or_else(|| fail(format!("{k}: нужно значение")));
@@ -79,6 +81,7 @@ fn args() -> Args {
             "--solarbox-url" => a.url = Some(v()),
             "--user" => a.user = Some(v()),
             "--yes" => a.yes = true,
+            "--ssh-check" => a.ssh_check = true,
             "-h" | "--help" => {
                 println!("solarbox-install [--router <адрес роутера>]");
                 std::process::exit(0)
@@ -186,7 +189,12 @@ async fn main() {
         x if x.is_empty() => "admin".to_string(),
         x => x,
     });
-    let pw = std::env::var("SOLARBOX_ROUTER_PASSWORD").unwrap_or_else(|_| rpassword::prompt_password("  Пароль: ").unwrap_or_else(|e| fail(e)));
+    let pw = std::env::var("SOLARBOX_ROUTER_PASSWORD").unwrap_or_else(|_| {
+        let p = rpassword::prompt_password("  Пароль: ").unwrap_or_else(|e| fail(e));
+        // Nothing is echoed while typing or pasting: say what arrived.
+        info(&format!("  (принят, {} симв.)", p.chars().count()));
+        p
+    });
     let mut ros = Ros::new(&format!("{host}:{}", a.rest_port), &user, &pw);
 
     let res = match ros.get("/system/resource") {
@@ -198,6 +206,13 @@ async fn main() {
     };
     let (version, arch_name) = (s(&res, "version").to_string(), s(&res, "architecture-name").to_string());
     info(&format!("{} · RouterOS {version} · {arch_name}", s(&res, "board-name")));
+    if a.ssh_check {
+        let c = ok(ssh::Ssh::connect(&host, a.ssh_port, &ros.user, &ros.pw).await, "SSH");
+        let mut out = Vec::new();
+        ok(c.run_until_closed(":put [/system/identity/get name]", |l| out.push(l.to_string())).await, "SSH");
+        info(&format!("SSH работает: {}", out.last().map(String::as_str).unwrap_or("")));
+        return;
+    }
 
     // ---- can it run Solarbox at all ----
     let arch = ros::server_arch(&arch_name).unwrap_or_else(|| {

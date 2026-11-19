@@ -58,6 +58,12 @@ impl Ssh {
                 while let Some(i) = buf.find(['\r', '\n']) {
                     let l: String = buf.drain(..=i).collect();
                     let l = clean(&l);
+                    // After the factory-password prompt RouterOS keeps the
+                    // session open at its CLI prompt: the command is over.
+                    if l.starts_with('[') && l.contains("] >") {
+                        let _ = ch.close().await;
+                        return Ok(());
+                    }
                     if !l.is_empty() {
                         line(&l);
                     }

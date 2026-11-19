@@ -9,8 +9,8 @@ description = "Installs Solarbox into a container on the site's MikroTik router"
 tokio = { version = "1", features = ["rt", "macros", "net", "time", "io-util"] }
 # SSH for the two steps REST cannot do: holding the device-mode session open
 # and uploading the image (SFTP). ring as the crypto backend: no C toolchain
-# quirks on Windows/Android/armv5.
-russh = { version = "0.65", default-features = false, features = ["ring"] }
+# quirks on Windows/Android/armv5. rsa: many routers' host key is RSA.
+russh = { version = "0.65", default-features = false, features = ["ring", "rsa"] }
 russh-sftp = "3"
 ureq = { version = "2", default-features = false, features = ["tls", "json"] }
 serde_json = "1"
