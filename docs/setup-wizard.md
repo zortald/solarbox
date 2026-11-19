@@ -149,10 +149,13 @@ current network under the constant key, then the generic image.
 - [x] Server: `board` block in ingest, `GET /api/discovered`
 - [x] Wizard UI prototype (`wizard.html`, simulated, `?demo` only)
 - [x] Repo history check → AGPL-3.0, public
-- [ ] Server: adopt by MAC, discovery per slot, site name, draft + review/apply, wizard autostart, writing board settings, router seam
-- [ ] `gen-board.py` for every combination (incl. S3, generic PI30)
+- [x] Server: adopt by MAC (follows IP changes), discovery per slot, site name, draft + review/apply, wizard autostart, writing board settings
+- [ ] Router seam (RouterOS / none / OpenWrt)
+- [x] Generator by chip (c3, s3, esp32) × JK slots; boards report their chip
+- [ ] Generic PI30 inverter in the generator (no inverter on the bench yet)
 - [x] On-demand builds for the server: `build.yml`, signing, releases, relay Worker (board images next)
-- [ ] Bench: S3 end-to-end, emulated JK
-- [ ] Wizard wired to the real server, step by step
+- [x] Bench: ESP32-S3 flashed, Wi-Fi over USB (Improv), found and adopted in the wizard, a JK BMS emulated by the Mac found over BLE, chosen, written to the board, connected; OTA from the library
+- [x] Wizard wired to the real server (`?demo` keeps the simulation)
+- [ ] Writing BMS thresholds and inverter settings from the wizard (listed for manual entry for now)
 - [ ] Self-update with rollback
 - [x] Installer CLI + launch lines, tested on CHR (arm64, emulated); real routers next
