@@ -151,7 +151,7 @@ current network under the constant key, then the generic image.
 - [x] Repo history check → AGPL-3.0, public
 - [ ] Server: adopt by MAC, discovery per slot, site name, draft + review/apply, wizard autostart, writing board settings, router seam
 - [ ] `gen-board.py` for every combination (incl. S3, generic PI30)
-- [ ] On-demand builds: Worker, GitHub Actions, signing, releases
+- [x] On-demand builds for the server: `build.yml`, signing, releases, relay Worker (board images next)
 - [ ] Bench: S3 end-to-end, emulated JK
 - [ ] Wizard wired to the real server, step by step
 - [ ] Self-update with rollback

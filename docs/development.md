@@ -63,6 +63,21 @@ the same port as plain ingest), `router.rs` (RouterOS REST), `changes.rs`
   `/api/latest` with `page.route` to show states that aren't happening live.
 - `node --check` every JS file you edit (CI does too).
 
+## Releases and on-demand builds
+
+- A release is a `vX.Y.Z` tag. Nothing is built when it is pushed: artifacts
+  are built when first asked for and kept in the release.
+- `.github/workflows/build.yml` builds one artifact (`kind`, `arch`,
+  `version`), signs every file with ed25519 (secret `SB_SIGNING_KEY`, public
+  key `deploy/signing-key.pub`) and uploads it, signature last. Run by hand:
+  `gh workflow run build.yml -f kind=server -f arch=armv5 -f version=v0.1.0`.
+- `relay/` is the Cloudflare Worker in front of it (`GET /v1/server/<arch>`):
+  built → links, not yet → starts the build. Tests: `node --test relay/test.mjs`.
+  Deploy: `cd relay && npx wrangler@4 deploy`; its GitHub token (fine-grained,
+  this repo only, Actions read/write) is set with `npx wrangler@4 secret put GH_TOKEN`.
+- Verify a file: `openssl pkeyutl -verify -pubin -inkey <pem> -rawin -in <file> -sigfile <file>.sig`
+  (the PEM is `deploy/signing-key.pub` with the ed25519 SPKI prefix).
+
 ## Conventions
 
 - Match the surrounding style; comment density as in the file.
