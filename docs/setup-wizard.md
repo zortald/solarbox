@@ -157,12 +157,29 @@ Checked on a real hAP ax S (EN7562CT, RouterOS 7.25, the site-1 model):
   it; Ctrl-C skips that and leaves the password as it is (the installer must
   do the same).
 
-Not checked yet: CH340/CP210x boards (D1 mini, ESP32 DevKit); a board plugged
-in after the container started, and `devices` set while nothing is plugged
-in (can the installer reserve the router's USB port up front?); what
-changing `devices` does to a running container (a container got "Exec format
-error" after it on CHR — to find out). OpenWrt and Docker see the port
-directly.
+Plugging and unplugging (simulated with `/system/routerboard/usb/power-reset`,
+which really cuts the board's power):
+- `devices` can only be set while the device is plugged in ("input does not
+  match any value of device" otherwise); once set it stays (as a reference,
+  e.g. `*4`) when the board is gone, and a container with an absent device
+  still starts normally;
+- the container's `/dev/ttyACM0` is created when the container starts with
+  the board present. Then unplug/replug works live: open() fails with ENXIO
+  while it is out and works again ≈8 s after it is back; espflash read the
+  chip without a restart;
+- started without the board, the node does not appear when it is plugged
+  in later: a container restart (board present) brings it.
+
+So: the installer assigns the router's USB to the container when a board is
+plugged in during the install; otherwise the wizard does it the first time a
+board is plugged in (the router's REST shows the port as active even to the
+read-only user; setting `devices` needs the owner's router password once, as
+«Доступ» does). Solarbox polls the port; with the assignment in place and
+no node yet it restarts itself (exit → restart-policy) to pick the board up.
+
+Not checked yet: CH340/CP210x boards (D1 mini, ESP32 DevKit), and whether
+another board in the same port keeps the same device reference. OpenWrt and
+Docker see the port directly.
 
 Restart policy: `on-failure` without an interval restarts at once forever
 (seen: thousands of restarts flooding the log); the installer sets 10 s.
