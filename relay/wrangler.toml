@@ -1,6 +1,6 @@
 # Build relay: `npx wrangler@4 deploy` from this directory.
 # The GitHub token is a secret: `npx wrangler@4 secret put GH_TOKEN`.
-name = "solarbox-build"
+name = "get"
 main = "src/index.js"
 compatibility_date = "2026-11-01"
 
