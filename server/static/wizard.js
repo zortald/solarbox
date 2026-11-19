@@ -58,6 +58,8 @@
     inv: null,
     tg: { token: '' },
     money: { day: '', night: false, nday: '', from: 23, to: 7 },
+    usbUse: {},          // USB port of the router → chip key, boards chosen on «Платы»
+    wifi: { ssid: '' },  // network for boards flashed from the router (password not kept)
   };
 
   function derive() {
@@ -185,7 +187,7 @@
       const rec = buyFor(need().inv, need().nb);
       const st = anyStock() ? fromStock() : null;
       const stepper = (k) => `<span class="wzstep"><button class="btn" data-have="${k}" data-d="-1" ${W.have[k] ? '' : 'disabled'}>−</button><b>${W.have[k]}</b><button class="btn" data-have="${k}" data-d="1">+</button></span>`;
-      return `<div class="panel">
+      return usbPanel() + `<div class="panel">
         <h2>Рекомендуем</h2>
         ${rec.map(boardRow).join('')}
         ${st ? '' : kitList(rec)}
@@ -373,7 +375,7 @@
     const parts = kit([b]), sec = 2 + (b.inv ? 1 : 0) + (pwrSrc(b) !== 'inv' ? 1 : 0);
     const t = fwTarget(b), have = FIRMWARE.includes(t);
     // The image comes first: without it the board never shows up below.
-    const fwBox = have
+    const fwBox = b.usb && have ? usbBox(b, i) : have
       ? `<div class="wzfw"><div><b>Прошивка для этой платы</b><small class="muted"><code>solarbox-firmware-${t}.bin</code> — собирается один раз для всех таких плат, потом сразу</small></div>
           <button class="btn on" data-fw="${i}">Скачать прошивку</button></div>`
       : `<div class="wzfw warn"><div><b>Прошивки для такой платы пока нет</b><small>${b.inv ? 'Драйвер инвертора PI30 ещё в работе — плата для инвертора пока не прошивается из Solarbox.' : 'Такое сочетание платы и числа BMS не собирается.'}
@@ -601,7 +603,7 @@
   }
 
   // ---- the server: draft, discovered boards, plan ----
-  const KEEP = ['i', 'want', 'power', 'have', 'plan', 'boards', 'site', 'packs', 'batt', 'inv', 'tg', 'money'];
+  const KEEP = ['i', 'want', 'power', 'have', 'plan', 'boards', 'site', 'packs', 'batt', 'inv', 'tg', 'money', 'usbUse', 'wifi'];
   // Device names in Solarbox, in order over all BMS boards: bms, bms2, bms3…
   function draft() {
     const ui = {};
@@ -726,6 +728,107 @@
     return W.applied;
   }
 
+  // ---- boards in the router's USB: pick on «Платы», flash on «Сборка» ----
+  // espflash chip name → our board key.
+  const CHIP_KEY = { esp32s3: 's3', esp32c3: 'c3', esp32: 'esp32', esp8266: 'd1' };
+  let usb = { ports: [] }, usbBusy = false, restarting = false, wifiPw = '';
+  async function pollUsb() {
+    if (DEMO || !['pick', 'build'].includes(cur().id) || usbBusy) return;
+    usbBusy = true;
+    try {
+      usb = await api('/api/usb');
+      restarting = false;
+      // A board plugged in after Solarbox started: it restarts to reach it.
+      if (usb.restart_needed) {
+        restarting = true;
+        await api('/api/usb/restart', { method: 'POST' }).catch(() => {});
+      } else {
+        const p = usb.ports.find((x) => x.node && !x.board && !x.tried);
+        if (p) {
+          p.tried = true; render();
+          try { p.board = (await api('/api/usb/identify', { json: { port: p.port } })).board; }
+          catch (e) { p.error = e.message; }
+          usb = Object.assign(await api('/api/usb'), {});
+        }
+      }
+    } catch (e) {
+      if (!restarting) usb.error = e.message; // during a restart the server is away for ≈10 s
+    } finally { usbBusy = false; }
+    // Unplugged boards drop out of the choice.
+    for (const port of Object.keys(W.usbUse)) if (!usb.ports.some((x) => x.port === port)) delete W.usbUse[port];
+    if (!document.activeElement || !document.activeElement.matches('input')) render();
+  }
+  setInterval(pollUsb, 3000);
+
+  function usbPanel() {
+    if (DEMO) return '';
+    const rows = usb.ports.map((p) => {
+      const b = p.board, key = b && CHIP_KEY[b.chip], used = W.usbUse[p.port];
+      const what = b ? `${CHIPS[key]?.t || b.chip} · ${b.flash} · MAC ${esc(b.mac)}` : esc(p.kind) + (p.serial ? ` · ${esc(p.serial)}` : '');
+      const state = restarting ? '<span class="spin"></span>подключаюсь к новой плате (≈10 с)…'
+        : p.error ? `<span class="warn">${esc(p.error)}</span>`
+          : !b ? '<span class="spin"></span>опознаю…' : '';
+      return `<div class="wzbrow"><span class="wznum">USB</span><span><b>${what}</b><small class="muted">${state || esc(p.product || '')}</small></span>
+        ${key ? `<button class="btn ${used ? 'on' : ''}" data-usbuse="${p.port}" data-chip="${key}">${used ? 'Используется' : 'Использовать'}</button>` : ''}</div>`;
+    }).join('');
+    return `<div class="panel"><h2>Воткнуто в USB роутера</h2>
+      ${rows || '<p class="muted small">Ничего. Воткните плату в USB роутера — Solarbox сам её опознает, прошьёт и даст ей Wi-Fi; потом её можно отключить и нести к инвертору.</p>'}
+      ${rows ? '<p class="muted small">Выбранные платы считаются «уже есть» и прошиваются прямо с роутера на шаге «Сборка».</p>' : ''}</div>`;
+  }
+  // «Что уже есть» counts the chosen USB boards too.
+  function useUsb(port, key) {
+    if (W.usbUse[port]) delete W.usbUse[port]; else W.usbUse[port] = key;
+    const n = Object.values(W.usbUse).filter((k) => k === key).length;
+    if (W.usbUse[port] ? W.have[key] < n : W.have[key] > 0) W.have[key] += W.usbUse[port] ? 1 : -1;
+    render();
+  }
+
+  // On the board's card: flash it right from the router, then its Wi-Fi.
+  function usbBox(b, i) {
+    const p = usb.ports.find((x) => x.port === b.usb), j = p?.job, t = fwTarget(b), st = W.boards[i] || {};
+    if (!p) return `<div class="wzfw warn"><div><b>Плату вынули из USB роутера</b><small>Воткните её обратно — продолжим с того же места.</small></div></div>`;
+    let body;
+    if (st.wifi) body = `<div class="ok">✓ Прошита и в Wi-Fi${st.wifi !== true ? `: ${esc(st.wifi)}` : ''}. Можно отключать от роутера и нести на место — дальше она появится ниже сама.</div>`;
+    else if (j?.state === 'done') body = `<div class="ok">✓ Прошита: ${esc(j.target)} ${esc(j.version)}.</div>
+      <div class="wzrow"><label class="wzf"><span>Wi-Fi для платы — сеть</span><input data-k="wifi.ssid" value="${esc(W.wifi.ssid)}" autocomplete="off"></label>
+        <label class="wzf"><span>Пароль</span><input id="wz-wifipw" type="password" autocomplete="off" value="${esc(wifiPw)}"></label></div>
+      <button class="btn on" data-usbwifi="${i}">Дать плате Wi-Fi</button>
+      <p class="muted small">Сеть — та, что будет у платы на месте установки. Пароль уйдёт в плату, Solarbox его не хранит.</p>`;
+    else if (j && ['fetching', 'building', 'flashing', 'verifying'].includes(j.state)) body = `<div class="muted"><span class="spin"></span>${
+      { fetching: 'Получаю прошивку…', building: 'Прошивка собирается (≈3–5 мин, один раз для всех таких плат)…', flashing: `Прошиваю… ${j.pct || 0} %`, verifying: 'Проверяю записанное…' }[j.state]}</div>`;
+    else body = `${j?.state === 'failed' ? `<p class="warn small">Не получилось: ${esc(j.error)}</p>` : ''}
+      <button class="btn on" data-usbflash="${i}">Прошить</button>`;
+    return `<div class="wzfw"><div style="flex:1"><b>Плата в USB роутера</b><small class="muted">${esc(p.board?.mac || p.serial || p.port)} · прошивка <code>${t}</code> прямо с роутера</small>${body}</div></div>`;
+  }
+  async function usbFlash(i) {
+    const b = W.plan[i];
+    try {
+      await api('/api/usb/flash', { json: { port: b.usb, target: fwTarget(b) } });
+      // While the library builds the image, ask again until it is there.
+      const wait = async () => {
+        await new Promise((ok) => setTimeout(ok, 4000));
+        const j = (await api('/api/usb')).ports.find((x) => x.port === b.usb)?.job;
+        if (j?.state === 'building') { await new Promise((ok) => setTimeout(ok, 15000)); return usbFlash(i); }
+        if (j && ['fetching', 'flashing', 'verifying'].includes(j.state)) return wait();
+      };
+      render(); await wait();
+    } catch (e) { toast('Прошивка: ' + e.message, true); }
+  }
+  async function usbWifi(i, btn) {
+    const pw = wifiPw;
+    if (!W.wifi.ssid.trim()) return toast('Введите сеть Wi-Fi', true);
+    btn.disabled = true; btn.textContent = 'Плата подключается… (до минуты)';
+    try {
+      // The board reaches Solarbox at this router's address, plain HTTP, port 8080.
+      const solarbox = `http://${location.hostname}:8080`;
+      const r = await api('/api/usb/wifi', { json: { port: W.plan[i].usb, ssid: W.wifi.ssid.trim(), password: pw, solarbox } });
+      wifiPw = '';
+      W.boards[i] = Object.assign(W.boards[i] || {}, { wifi: r.url || true });
+      toast('Плата в Wi-Fi');
+    } catch (e) { toast(e.message, true); }
+    render();
+  }
+
   // ---- validation per step ----
   function invalid(id) {
     if (id === 'goals' && !W.use.pi30 && !W.use.jkble)
@@ -749,6 +852,11 @@
   // Leaving «Платы»: fix the plan; a changed plan forgets adopted boards.
   function fixPlan() {
     const p = anyStock() ? fromStock().boards : buyFor(need().inv, need().nb);
+    const free = Object.entries(W.usbUse);
+    for (const b of p) {
+      const k = b.own && free.findIndex(([, c]) => c === b.chip);
+      if (k !== false && k >= 0) b.usb = free.splice(k, 1)[0][0];
+    }
     if (JSON.stringify(p) !== JSON.stringify(W.plan)) { W.plan = p; W.boards = {}; for (const k in sims) { clearTimeout(sims[k]); delete sims[k]; } }
   }
 
@@ -790,6 +898,10 @@
       const k = el.dataset.have; W.have[k] = Math.max(0, Math.min(9, W.have[k] + +el.dataset.d)); render();
     }));
     body.querySelectorAll('[data-sim]').forEach((el) => (el.onclick = () => { const i = el.dataset.sim; clearTimeout(sims[i]); sims[i] = 0; simulate(+i, true); }));
+    const wp = $('#wz-wifipw'); if (wp) wp.oninput = () => { wifiPw = wp.value; };
+    body.querySelectorAll('[data-usbuse]').forEach((el) => (el.onclick = () => useUsb(el.dataset.usbuse, el.dataset.chip)));
+    body.querySelectorAll('[data-usbflash]').forEach((el) => (el.onclick = () => usbFlash(+el.dataset.usbflash)));
+    body.querySelectorAll('[data-usbwifi]').forEach((el) => (el.onclick = () => usbWifi(+el.dataset.usbwifi, el)));
     body.querySelectorAll('[data-later]').forEach((el) => (el.onclick = () => { const i = +el.dataset.later; W.boards[i] = Object.assign(W.boards[i] || {}, { later: !W.boards[i]?.later }); render(); }));
     body.querySelectorAll('[data-adopt]').forEach((el) => (el.onclick = () => { W.boards[el.dataset.adopt].adopted = true; toast('Плата будет подключена при «Применить»'); render(); }));
     body.querySelectorAll('[data-fw]').forEach((el) => (el.onclick = () => (DEMO ? toast('Тестовый режим: прошивка не скачивается') : firmware(W.plan[+el.dataset.fw], el))));

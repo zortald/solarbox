@@ -51,12 +51,13 @@ enum Got {
     Image(String, Vec<u8>),
 }
 
-fn fetch(target: &str) -> Result<Got, String> {
+/// `which`: "ota" (over the air) or "bin" (factory image, first flash).
+fn fetch_file(target: &str, which: &str) -> Result<Got, String> {
     let v: Value = get(&format!("{RELAY}/v1/firmware/{target}"))?.into_json().map_err(|e| e.to_string())?;
     match v["status"].as_str() {
         Some("building") => Ok(Got::Building),
         Some("ready") => {
-            let f = &v["files"]["ota"];
+            let f = &v["files"][which];
             let (url, sig) = (f["url"].as_str().ok_or("нет образа для обновления")?, f["sig"].as_str().ok_or("нет подписи")?);
             let image = bytes(url)?;
             if !verify(&image, &bytes(sig)?) {
@@ -66,6 +67,19 @@ fn fetch(target: &str) -> Result<Got, String> {
         }
         Some("failed") => Err("сборка этой прошивки не удалась, попробуйте через полчаса".into()),
         _ => Err(format!("сервер сборок: {}", v["error"].as_str().unwrap_or("?"))),
+    }
+}
+
+fn fetch(target: &str) -> Result<Got, String> {
+    fetch_file(target, "ota")
+}
+
+/// The signed factory image (bootloader + partitions + app) for a first
+/// flash over USB. Err("building") while the library builds it.
+pub fn factory(target: &str) -> Result<(String, Vec<u8>), String> {
+    match fetch_file(target, "bin")? {
+        Got::Building => Err("building".into()),
+        Got::Image(v, i) => Ok((v, i)),
     }
 }
 

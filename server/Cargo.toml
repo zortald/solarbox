@@ -25,6 +25,9 @@ rcgen = { version = "0.13", default-features = false, features = ["crypto", "pem
 hyper = "1"
 hyper-util = { version = "0.1", features = ["server-auto", "tokio", "service"] }
 ureq = { version = "2", default-features = false, features = ["tls", "json"] }
+# Flashing boards plugged into the router's USB (no CLI, no libudev).
+espflash = { version = "4.7", default-features = false, features = ["serialport"] }
+serialport = { version = "4.7", default-features = false }
 
 # Small, static, long-lived service: optimise for size, abort on panic
 # (the container restarts it), one codegen unit + LTO for a lean binary.

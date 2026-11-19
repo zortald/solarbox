@@ -24,6 +24,7 @@ mod telegram;
 mod tls;
 mod library;
 mod tz;
+mod usb;
 mod wizard;
 
 use axum::{
@@ -80,6 +81,8 @@ struct AppState {
     discovery: Arc<discovery::Discovery>,
     /// Setup wizard draft and state.
     wizard: Arc<wizard::Store>,
+    /// Boards in the router's USB (identify, first flash).
+    usb: Arc<usb::Usb>,
 }
 
 #[derive(RustEmbed)]
@@ -141,6 +144,7 @@ async fn main() {
         energy: Arc::new(energy::Energy::new()),
         discovery: Arc::new(discovery::Discovery::default()),
         wizard: Arc::new(wizard::Store::open(&data_dir)),
+        usb: Arc::new(usb::Usb::default()),
     };
     {
         let c = db.lock().unwrap();
@@ -252,6 +256,11 @@ async fn main() {
         .route("/api/compact", post(compact_now))
         .route("/api/boards", get(boards::list))
         .route("/api/discovered", get(discovery::api))
+        .route("/api/usb", get(usb::list))
+        .route("/api/usb/identify", post(usb::identify_api))
+        .route("/api/usb/flash", post(usb::flash_api))
+        .route("/api/usb/restart", post(usb::restart))
+        .route("/api/usb/wifi", post(usb::wifi_api))
         .route("/api/wizard", get(wizard::get).put(wizard::put))
         .route("/api/wizard/skip", post(wizard::skip))
         .route("/api/wizard/plan", get(wizard::plan_api))
