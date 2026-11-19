@@ -349,3 +349,9 @@ body.wz main { max-width: 640px; }
 .rj { fill: #d8dee4; stroke: #8b98a8; }
 .wire.tp { stroke-width: 3; } .wire.tps { stroke: #fff; stroke-width: 1.4; stroke-dasharray: 4 4; }
 .wzvp { margin-top: 6px; } .wzvp .btn { font-size: 12px; padding: 6px 8px; }
+
+/* wizard review: one card per change */
+.wzitem { padding: 10px 0; border-top: 1px solid var(--line); }
+.wzitem:first-of-type { border-top: 0; }
+.wzit { display: flex; justify-content: space-between; gap: 8px; margin-bottom: 2px; }
+.wzmark { flex: none; }

@@ -23,6 +23,7 @@ mod sysinfo;
 mod telegram;
 mod tls;
 mod tz;
+mod wizard;
 
 use axum::{
     extract::{DefaultBodyLimit, Json, Path, Query, State},
@@ -76,6 +77,8 @@ struct AppState {
     energy: Arc<energy::Energy>,
     /// Boards that announced themselves (setup wizard).
     discovery: Arc<discovery::Discovery>,
+    /// Setup wizard draft and state.
+    wizard: Arc<wizard::Store>,
 }
 
 #[derive(RustEmbed)]
@@ -136,6 +139,7 @@ async fn main() {
         outages: outage_detector,
         energy: Arc::new(energy::Energy::new()),
         discovery: Arc::new(discovery::Discovery::default()),
+        wizard: Arc::new(wizard::Store::open(&data_dir)),
     };
     {
         let c = db.lock().unwrap();
@@ -242,6 +246,11 @@ async fn main() {
         .route("/api/compact", post(compact_now))
         .route("/api/boards", get(boards::list))
         .route("/api/discovered", get(discovery::api))
+        .route("/api/wizard", get(wizard::get).put(wizard::put))
+        .route("/api/wizard/skip", post(wizard::skip))
+        .route("/api/wizard/plan", get(wizard::plan_api))
+        .route("/api/wizard/apply", post(wizard::apply))
+        .route("/api/wizard/emergency", get(wizard::emergency))
         .route("/api/board/:name/ping", get(boards::ping))
         .route("/api/board/:name/entity", get(boards::entity))
         .route("/api/board/:name/action", post(boards::action))
@@ -331,6 +340,7 @@ async fn ingest(State(st): State<AppState>, headers: HeaderMap, Json(body): Json
             let ts = it.ts.unwrap_or_else(now);
             if let Some(b) = &it.board {
                 st.discovery.note(&it.device, b, ts);
+                discovery::follow_ip(&st, b);
             }
             match db::insert(&mut c, &it.device, ts, &it.metrics) {
                 Ok(n) => {

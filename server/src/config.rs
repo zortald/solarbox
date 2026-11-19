@@ -18,6 +18,10 @@ pub struct BoardCfg {
     pub web_port: u16,
     #[serde(default = "d_ota")]
     pub ota_port: u16,
+    /// The board's Wi-Fi MAC: how an adopted board is recognised when its IP
+    /// changes (set by the setup wizard; older entries have none).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mac: Option<String>,
     /// UI-only fields (title, chip, restart/version entity paths, …).
     #[serde(flatten)]
     pub ui: serde_json::Map<String, serde_json::Value>,
@@ -42,6 +46,9 @@ fn star() -> String { "*".into() }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Config {
+    /// The site's name, shown in the header and in Telegram messages.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub site_name: String,
     #[serde(default)]
     pub boards: Vec<BoardCfg>,
     #[serde(default = "d_read")]
@@ -90,13 +97,17 @@ impl Config {
     pub fn default_with(boards_env: &str) -> Self {
         let boards = crate::boards::parse_boards(boards_env)
             .into_iter()
-            .map(|b| BoardCfg { name: b.name, host: b.host, web_port: b.web_port, ota_port: b.ota_port, ui: Default::default() })
+            .map(|b| BoardCfg { name: b.name, host: b.host, web_port: b.web_port, ota_port: b.ota_port, mac: None, ui: Default::default() })
             .collect();
-        Config { boards, read_domains: d_read(), actions: d_actions(), ui: serde_json::json!({}), timezone: Default::default(), money: Default::default() }
+        Config { site_name: String::new(), boards, read_domains: d_read(), actions: d_actions(), ui: serde_json::json!({}), timezone: Default::default(), money: Default::default() }
     }
 
     pub fn board(&self, name: &str) -> Option<&BoardCfg> {
         self.boards.iter().find(|b| b.name == name)
+    }
+
+    pub fn board_by_mac(&self, mac: &str) -> Option<&BoardCfg> {
+        self.boards.iter().find(|b| b.mac.as_deref().is_some_and(|m| m.eq_ignore_ascii_case(mac)))
     }
 
     /// Is `action` (with optional `value`) on `domain/entity` of `board` allowed?
@@ -167,6 +178,7 @@ pub fn pattern_match(pat: &str, s: &str) -> bool {
 pub struct Store {
     path: PathBuf,
     inner: Mutex<(Option<SystemTime>, Arc<Config>, Option<String>)>,
+    updating: Mutex<()>,
 }
 
 impl Store {
@@ -182,7 +194,7 @@ impl Store {
                 Err(e) => eprintln!("[config] {e}"),
             }
         }
-        let st = Store { path, inner: Mutex::new((None, Arc::new(default), None)) };
+        let st = Store { path, inner: Mutex::new((None, Arc::new(default), None)), updating: Mutex::new(()) };
         st.get();
         st
     }
@@ -214,13 +226,31 @@ impl Store {
         self.inner.lock().unwrap().2.clone()
     }
 
+    /// Change the current config in code and save it. Refused while the file
+    /// on disk does not parse (it would be overwritten with the old one).
+    pub fn update(&self, f: impl FnOnce(&mut Config)) -> Result<(), String> {
+        let _one = self.updating.lock().unwrap(); // read-modify-write as one step
+        let mut c = (*self.get()).clone();
+        if let Some(e) = self.error() {
+            return Err(format!("config.json не читается ({e}) — сначала исправьте его"));
+        }
+        f(&mut c);
+        self.save(&serde_json::to_string(&c).map_err(|e| e.to_string())?)
+    }
+
     /// Validate and replace the file (the next `get` picks it up).
     pub fn save(&self, text: &str) -> Result<(), String> {
         let c: Config = serde_json::from_str(text).map_err(|e| format!("invalid config: {e}"))?;
         let pretty = serde_json::to_string_pretty(&c).map_err(|e| e.to_string())?;
+        // Under the lock: two quick saves must not interleave, and the next
+        // `get` must see this one even when the filesystem's mtime has
+        // one-second resolution (the file would look unchanged).
+        let mut g = self.inner.lock().unwrap();
         let tmp = self.path.with_extension("json.tmp");
         std::fs::write(&tmp, pretty).map_err(|e| e.to_string())?;
-        std::fs::rename(&tmp, &self.path).map_err(|e| e.to_string())
+        std::fs::rename(&tmp, &self.path).map_err(|e| e.to_string())?;
+        *g = (std::fs::metadata(&self.path).and_then(|m| m.modified()).ok(), Arc::new(c), None);
+        Ok(())
     }
 }
 
@@ -241,6 +271,19 @@ mod tests {
         assert!(!pattern_match("PE[abjkuvxyz]+", "PEq"));
         assert!(pattern_match("F50", "F50"));
         assert!(pattern_match("@+", "abc"));
+    }
+
+    #[test]
+    fn quick_updates_keep_each_other() {
+        let dir = std::env::temp_dir().join(format!("sb-cfg-{}", std::process::id()));
+        let _ = std::fs::create_dir_all(&dir);
+        let st = Store::open(dir.join("config.json"), Config::default_with(""));
+        st.update(|c| c.site_name = "Дача".into()).unwrap();
+        st.update(|c| c.timezone.offset_min = 60).unwrap(); // same second
+        let c = st.get();
+        assert_eq!(c.site_name, "Дача");
+        assert_eq!(c.timezone.offset_min, 60);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

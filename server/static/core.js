@@ -175,6 +175,10 @@ const SB = (() => {
     document.querySelectorAll('nav a').forEach((a) => (a.onclick = () => $('#nav').classList.remove('open')));
     window.addEventListener('hashchange', go);
     await loadConfig();
+    // A fresh Solarbox: no boards and the wizard neither finished nor skipped.
+    if (!(cfg.boards || []).length) {
+      try { if ((await api('/api/wizard')).auto) { location.href = '/wizard.html'; return; } } catch (e) { /* stay on the dashboard */ }
+    }
     renderAdmin();
     refreshLatest().then(go);
     stream();

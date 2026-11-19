@@ -1,12 +1,16 @@
-// Setup wizard (prototype): welcome → equipment (whatever is connected is both
-// shown and controlled) → boards (recommended, or from what the owner already
-// has) → site → assembly (buy, solder, flash, adopt) → battery → inverter →
-// tariff → Telegram → done.
-// Test mode only for now: boards and BMS are simulated, nothing is saved,
-// written to hardware or sent anywhere.
+// Setup wizard: welcome → equipment (whatever is connected is both shown and
+// controlled) → boards (recommended, or from what the owner already has) →
+// site → assembly (buy, solder, flash, adopt) → battery → inverter → tariff →
+// Telegram → review → done.
+// Nothing is applied while stepping through: the answers are a draft on the
+// server (PUT /api/wizard), the review screen shows the server's plan (old →
+// new) and «Применить» carries it out. `?demo`: boards and BMS are simulated,
+// nothing is saved or sent.
 
 (() => {
-  const { $, esc, toast } = SB;
+  const { $, esc, toast, api } = SB;
+  const DEMO = new URLSearchParams(location.search).has('demo');
+  const RELAY = 'https://get.solarbox.workers.dev';
 
   // Board chips: what each can carry. bleInv = BMS slots left when the same
   // board also talks to the inverter. `tested` = runs on a real site;
@@ -47,12 +51,12 @@
     have: { esp32: 0, s3: 0, c3: 0, d1: 0, max: false },     // boards the owner already has
     plan: [],            // [{ chip, inv, nb, own }] — fixed when leaving «Платы»
     boards: {},          // plan index → { found: {...}, adopted: bool }
-    site: { name: '', tz: 'Europe/Kyiv', pw: '', pw2: '' },
+    site: { name: '', tz: 'Europe/Kyiv' },
     scan: null,          // BLE scan results (null = not scanned yet)
     packs: [],           // chosen MACs
     batt: { chem: 'lfp', cells: 8, cap: 280, soc100: 3.45, soc0: 2.95, read: false },
     inv: null,
-    tg: { token: '', chat: '' },
+    tg: { token: '' },
     money: { day: '', night: false, nday: '', from: 23, to: 7 },
   };
 
@@ -73,6 +77,7 @@
     { id: 'inverter', t: 'Инвертор', skip: () => !ctlInv() },
     { id: 'tariff', t: 'Тариф', skip: () => !W.use.pi30 },
     { id: 'telegram', t: 'Telegram' },
+    { id: 'review', t: 'Проверка' },
     { id: 'done', t: 'Готово' },
   ];
   const steps = () => STEPS.filter((s) => !s.skip?.());
@@ -218,10 +223,7 @@
       ${field('Название', 'site.name', 'placeholder="Например: Дача" autocomplete="off"', 'Видно в заголовке и в сообщениях Telegram')}
       <label class="wzf"><span>Часовой пояс</span><select data-k="site.tz"><option value="Europe/Kyiv">Киев (UTC+2, летом UTC+3)</option></select>
         <small class="muted">По нему считаются сутки, ночной тариф и статистика</small></label>
-      <h2 class="wzgap">Пароль управления</h2>
-      <p class="muted small">Без пароля всё можно смотреть, но ничего нельзя менять: режимы инвертора, автоматизации, прошивки.</p>
-      ${field('Пароль', 'site.pw', 'type="password" autocomplete="new-password"', 'Не короче 8 символов')}
-      ${field('Ещё раз', 'site.pw2', 'type="password" autocomplete="new-password"')}
+      <p class="muted small">Входить в Solarbox — логином и паролем вашего роутера, отдельный пароль не нужен.</p>
     </div>`,
 
     build: () => W.plan.map(buildCard).join(''),
@@ -234,6 +236,7 @@
         scan = `<div class="panel"><div class="ph"><h2>BMS рядом с платой</h2><button class="btn" id="wz-rescan">Искать ещё раз</button></div>` +
           (!ready ? '<p class="warn">Сначала подключите плату BMS на шаге «Сборка».</p>'
             : W.scan === null ? '<p class="muted"><span class="spin"></span>Ищу по Bluetooth…</p>'
+              : !W.scan.length ? '<p class="warn small">Рядом с платой не видно ни одной JK BMS. Проверьте, что BMS включена и рядом (≈5–10 м), и нажмите «Искать ещё раз». Можно идти дальше и выбрать BMS позже.</p>'
               : W.scan.map((s) => `<label class="wzpick ${s.jk ? '' : 'dim'}"><input type="checkbox" data-pack="${s.mac}" ${W.packs.includes(s.mac) ? 'checked' : ''} ${s.jk ? '' : 'disabled'}>
                 <span><b>${esc(s.name)}</b><small class="muted">${s.mac} · ${s.rssi} дБм${s.jk ? ' · ' + s.proto : ' · не JK BMS'}</small></span></label>`).join('') +
                 `<p class="muted small">Отметьте свои (${W.want.nbms}) — сигнал сильнее у той, что ближе.</p>`) + '</div>';
@@ -253,7 +256,7 @@
           ${field('SOC 100 %, В/ячейку', 'batt.soc100', 'type="number" min="3.3" max="3.65" step="0.005" inputmode="decimal"', `≈ ${pack(b.soc100)} В на батарею`)}
           ${field('SOC 0 %, В/ячейку', 'batt.soc0', 'type="number" min="2.5" max="3.2" step="0.005" inputmode="decimal"', `≈ ${pack(b.soc0)} В на батарею`)}
         </div>
-        <p class="muted small">В BMS запишется только после «Далее» и вашего подтверждения. Сейчас — тестовый режим, ничего не пишется.</p>` : ''}
+        <p class="muted small">Мастер пока не записывает пороги в BMS сам: на шаге «Проверка» будет список значений, чтобы задать их в приложении JK.</p>` : ''}
       </div>`;
     },
 
@@ -272,7 +275,7 @@
         </div>
         ${field('Отключение нагрузки, В', 'inv.cut', 'type="number" step="0.1" inputmode="decimal"', `${(p.cut / W.batt.cells).toFixed(3)} В/ячейку — защита до BMS`)}
         <div class="wzchecks">${chk.map(([ok, t]) => `<div class="${ok ? 'ok' : 'warn'}">${ok ? '✓' : '!'} ${t}</div>`).join('')}</div>
-        <p class="muted small">Это предложение, не измерение. В инвертор запишется только после подтверждения.</p>
+        <p class="muted small">Это предложение, не измерение. Мастер пока не записывает в инвертор сам: значения будут в списке на шаге «Проверка».</p>
       </div>`;
     },
 
@@ -294,19 +297,43 @@
       <ol class="wzlist small">
         <li>В Telegram откройте <b>@BotFather</b> → <code>/newbot</code>, придумайте имя.</li>
         <li>Скопируйте токен сюда.</li>
-        <li>Напишите своему боту любое сообщение — Solarbox сам найдёт ваш чат.</li></ol>
+        <li>После «Применить» напишите своему боту <code>/start</code> и подтвердите себя в «Настройках → Telegram».</li></ol>
       ${field('Токен бота', 'tg.token', 'placeholder="123456:ABC…" autocomplete="off"')}
-      <div class="row"><button class="btn" id="wz-tgfind">Найти мой чат</button><span class="muted small" id="wz-tgmsg">${W.tg.chat ? 'Чат найден' : ''}</span></div>
     </div>`,
+
+    review: () => {
+      const r = W.review;
+      if (!r) return '<div class="panel"><p class="muted"><span class="spin"></span>Считаю, что изменится…</p></div>';
+      const res = W.results || {};
+      const groups = {};
+      for (const it of r.items) (groups[it.group] = groups[it.group] || []).push(it);
+      const row = (it) => {
+        const x = res[it.id];
+        const mark = !x ? '' : x.ok ? '<span class="ok">✓</span>' : `<span class="warn">✗ ${esc(x.error || '')}</span>`;
+        return `<div class="wzitem"><div class="wzit">${esc(it.title)}${mark ? ` <span class="wzmark">${mark}</span>` : ''}</div>
+          <div class="small"><span class="muted">${esc(it.old || 'не задано')}</span> → <b>${esc(it.new)}</b></div></div>`;
+      };
+      const manual = manualItems();
+      return (r.items.length ? Object.entries(groups).map(([g, items]) => `<div class="panel"><h2>${esc(g)}</h2>
+          ${items.map(row).join('')}</div>`).join('')
+        : `<div class="panel"><p class="ok">${W.applied ? 'Всё применено.' : 'Менять нечего — всё уже так.'}</p></div>`) +
+        (manual.length ? `<div class="panel"><h2>Вручную</h2>
+          <p class="muted small">Запись в BMS и инвертор из мастера ещё не сделана. Задайте эти значения сами (приложение JK BMS, меню инвертора):</p>
+          <ul class="wzlist">${manual.map((t) => `<li>${t}</li>`).join('')}</ul></div>` : '') +
+        (DEMO ? '<p class="muted small">Тестовый режим: «Применить» ничего не меняет.</p>' : '');
+    },
+
 
     done: () => `<div class="panel wzhero">
       <h2 class="wzh">Готово</h2>
+      ${W.emergency ? `<p>Аварийный пароль Solarbox — для входа с пустым логином, если роутер недоступен: <code>${esc(W.emergency)}</code><br>
+        <span class="muted small">Запишите его. Он показан один раз здесь и лежит на роутере в /data/admin-password.</span></p>` : ''}
       <div class="facts wzsum">
         <div><span>Объект</span><b>${esc(W.site.name || '—')}</b></div>
         <div><span>Инвертор</span><b>${W.use.pi30 ? 'PI30' : '—'}</b></div>
         <div><span>BMS</span><b>${W.use.jkble ? W.packs.length + ' × JK' : '—'}</b></div>
         <div><span>Платы</span><b>${W.plan.map((b) => CHIPS[b.chip].t.split(' ')[0]).join(' + ')}</b></div>
-        <div><span>Telegram</span><b>${W.tg.chat ? 'включён' : 'не подключён'}</b></div>
+        <div><span>Telegram</span><b>${W.tg.token ? 'бот подключён' : 'не подключён'}</b></div>
       </div>
       <p class="muted">Мастер всегда можно открыть снова в «Настройках» — он не перезапишет работающую настройку без вопроса.</p>
     </div>`,
@@ -346,16 +373,16 @@
     const parts = kit([b]), sec = 2 + (b.inv ? 1 : 0) + (pwrSrc(b) !== 'inv' ? 1 : 0);
     const fw = `solarbox-${b.chip}${b.inv ? '-pi30' : ''}${b.nb ? '-jk' + b.nb : ''}.bin`;
     const flash = `<ol class="wzlist">
-        <li>На <b>компьютере</b> в Chrome или Edge (с телефона прошить нельзя) — <button class="btn xs" data-fw>Скачать прошивку</button> <code>${fw}</code></li>
+        <li>На <b>компьютере</b> в Chrome или Edge (с телефона прошить нельзя) — <button class="btn xs" data-fw="${i}">Скачать прошивку</button> <code>${fw}</code></li>
         <li>Откройте <a href="https://web.esphome.io" target="_blank" rel="noopener">web.esphome.io</a>, подключите плату по USB → <b>Connect</b> → <b>Install</b> → выберите файл.</li>
         <li>После прошивки там же <b>Configure Wi-Fi</b> — сеть, в которой стоит роутер с Solarbox.</li>
         <li>Без компьютера под рукой: плата сама поднимает точку <code>solarbox-XXXX</code> — подключитесь с телефона и выберите Wi-Fi там.</li>
       </ol>`;
     let wait;
-    if (st.adopted) wait = `<div class="ok"><span class="dot ok"></span>Подключена: ${esc(st.found.ip)} · прошивка ${esc(st.found.fw)}</div>`;
+    if (st.adopted) wait = `<div class="ok"><span class="dot ok"></span>${st.already ? 'Уже подключена' : 'Подключится при «Применить»'}: ${esc(st.found.ip)} · ${esc(st.found.mac)} · прошивка ${esc(st.found.fw)}</div>`;
     else if (st.found) wait = `<div class="wznew"><div><b>Новая плата</b> <span class="muted small">${esc(c.t)} · ${esc(st.found.ip)} · ${esc(st.found.mac)} · прошивка ${esc(st.found.fw)}</span></div>
         <button class="btn on" data-adopt="${i}">Подключить</button></div>`;
-    else wait = `<div class="muted"><span class="spin"></span>Жду, когда плата появится в сети… <button class="btn xs" data-sim="${i}">имитировать</button></div>`;
+    else wait = `<div class="muted"><span class="spin"></span>Жду, когда плата появится в сети…${DEMO ? ` <button class="btn xs" data-sim="${i}">имитировать</button>` : ''}</div>`;
     const open = st.adopted ? '' : 'open';
     return `<div class="panel wzboard">
       <div class="ph"><h2>Плата ${i + 1} · ${c.t}</h2><span class="muted small">${roles(b)}</span></div>
@@ -564,25 +591,146 @@
     }, 2500);
   }
 
+  // ---- the server: draft, discovered boards, plan ----
+  const KEEP = ['i', 'want', 'power', 'have', 'plan', 'boards', 'site', 'packs', 'batt', 'inv', 'tg', 'money'];
+  // Device names in Solarbox, in order over all BMS boards: bms, bms2, bms3…
+  function draft() {
+    const ui = {};
+    for (const k of KEEP) ui[k] = W[k];
+    const adopt = [];
+    let nbms = 0, left = W.packs.slice();
+    W.plan.forEach((b, i) => {
+      const f = W.boards[i]?.found;
+      if (!f || !W.boards[i].adopted) return;
+      const firstBms = b.nb && !adopt.some((a) => a.slots.length);
+      const slots = left.splice(0, b.nb).map((mac, k) => {
+        nbms++;
+        const s = W.scan?.find((x) => x.mac === mac);
+        return { slot: k + 1, bms_mac: mac, proto: s?.proto || 'JK02_32S', device: nbms === 1 ? 'bms' : 'bms' + nbms };
+      });
+      adopt.push({ mac: f.mac, ip: f.ip, chip: f.chip || CHIPS[b.chip].t, title: b.inv ? 'Инвертор' : 'АКБ · JK BMS',
+        name: b.inv ? 'inverter' : firstBms ? 'bms' : 'bms-board' + (i + 1), slots });
+    });
+    return { ui, site: { name: W.site.name }, money: { day: +W.money.day || 0, night: !!W.money.night, nday: +W.money.nday || 0, from: +W.money.from, to: +W.money.to },
+      tg: { token: W.tg.token.trim() }, adopt };
+  }
+  // Debounced: every render asks to save; whoever waits gets the answer of
+  // the save that actually went out after their call.
+  let saving, waiting = [];
+  function save() {
+    if (DEMO) return Promise.resolve();
+    clearTimeout(saving);
+    return new Promise((res) => {
+      waiting.push(res);
+      saving = setTimeout(() => {
+        const done = waiting; waiting = [];
+        api('/api/wizard', { method: 'PUT', json: { draft: draft() } })
+          .catch((e) => toast('Черновик не сохранился: ' + e.message, true))
+          .then(() => done.forEach((f) => f()));
+      }, 300);
+    });
+  }
+
+  // Boards that announced themselves → the planned ones, by what they run.
+  let disc = [];
+  async function poll() {
+    if (DEMO || !['build', 'battery'].includes(cur().id)) return;
+    try { disc = await api('/api/discovered'); } catch (e) { return; }
+    const claimed = new Set(Object.values(W.boards).map((x) => x.found?.mac));
+    let changed = false;
+    W.plan.forEach((b, i) => {
+      if (W.boards[i]?.found) {
+        const d = disc.find((x) => x.mac === W.boards[i].found.mac);
+        if (d && d.ip !== W.boards[i].found.ip) { W.boards[i].found.ip = d.ip; changed = true; }
+        return;
+      }
+      const want = b.inv ? 'pi30' : 'jk-ble';
+      const d = disc.find((x) => x.type === want && !claimed.has(x.mac) && x.age < 120);
+      if (!d) return;
+      claimed.add(d.mac);
+      W.boards[i] = { found: { mac: d.mac, ip: d.ip, fw: d.fw || '?', type: d.type, chip: d.chip || '' }, adopted: !!d.adopted_as, already: d.adopted_as };
+      toast(`Найдена новая плата: ${d.ip}`);
+      changed = true;
+    });
+    // BLE scan results of our BMS boards.
+    const scan = [];
+    W.plan.forEach((b, i) => {
+      const d = b.nb && disc.find((x) => x.mac === W.boards[i]?.found?.mac);
+      for (const f of d?.found || []) if (!scan.some((s) => s.mac === f.mac)) scan.push({ name: f.name, mac: f.mac, rssi: f.rssi, jk: /^JK/i.test(f.name), proto: 'JK02_32S' });
+    });
+    if (scan.length || W.plan.some((b, i) => b.nb && W.boards[i]?.found)) {
+      scan.sort((a, b) => b.rssi - a.rssi);
+      if (JSON.stringify(scan) !== JSON.stringify(W.scan)) { W.scan = scan; changed = true; }
+    }
+    if (changed) render();
+  }
+  setInterval(poll, 3000);
+
+  // Firmware for a planned board: built on demand by the relay, reused after.
+  async function firmware(b, btn) {
+    const t = `${b.chip}${b.inv ? '-pi30' : ''}${b.nb ? '-jk' + b.nb : ''}`;
+    btn.disabled = true;
+    try {
+      for (let k = 0; k < 80; k++) {
+        const r = await fetch(`${RELAY}/v1/firmware/${t}`).then((x) => x.json());
+        if (r.status === 'ready') { location.href = r.files.bin.url; btn.textContent = 'Скачано'; return; }
+        if (r.status !== 'building') throw new Error(r.error || 'сборка не удалась');
+        btn.textContent = 'Собирается… (≈3–5 мин, один раз для всех)';
+        await new Promise((ok) => setTimeout(ok, 15000));
+      }
+      throw new Error('сборка идёт слишком долго');
+    } catch (e) {
+      toast('Прошивка: ' + e.message, true);
+      btn.textContent = 'Скачать прошивку';
+    } finally { btn.disabled = false; }
+  }
+
+  function manualItems() {
+    const out = [];
+    if (ctlBms()) out.push(`BMS: SOC 100 % при ${W.batt.soc100} В/ячейку (${pack(W.batt.soc100)} В), SOC 0 % при ${W.batt.soc0} В/ячейку (${pack(W.batt.soc0)} В)`);
+    if (ctlInv() && W.inv) out.push(`Инвертор: тип батареи ${W.inv.type}, заряд ${W.inv.bulk} В, поддержка ${W.inv.float} В, отключение нагрузки ${W.inv.cut} В`);
+    return out;
+  }
+
+  async function loadReview() {
+    W.review = null; render();
+    if (DEMO) {
+      W.review = { items: [{ id: 'site', group: 'Solarbox', title: 'Название объекта', old: '', new: W.site.name || '—' }] };
+    } else {
+      await save();
+      try { W.review = await api('/api/wizard/plan'); } catch (e) { toast(e.message, true); W.review = { items: [] }; }
+    }
+    render();
+  }
+
+  async function applyAll(only) {
+    if (DEMO) { toast('Тестовый режим: ничего не применяется'); W.applied = true; return true; }
+    const r = await api('/api/wizard/apply', { json: only ? { only } : {} });
+    W.results = Object.assign(W.results || {}, Object.fromEntries(r.results.map((x) => [x.id, x])));
+    W.applied = r.left === 0;
+    const failed = r.results.filter((x) => !x.ok).length;
+    toast(failed ? `Не получилось: ${failed}. Остальное применено — можно повторить.` : 'Применено', !!failed);
+    render();
+    return W.applied;
+  }
+
   // ---- validation per step ----
   function invalid(id) {
     if (id === 'goals' && !W.use.pi30 && !W.use.jkble)
       return W.want.invType === 'none' && W.want.bmsType === 'none' ? 'Выберите, что подключаем' : 'Пока нечего подключать: выбранное оборудование не поддерживается';
-    if (id === 'site') {
-      if (!W.site.name.trim()) return 'Введите название объекта';
-      if (W.site.pw.length < 8) return 'Пароль — не короче 8 символов';
-      if (W.site.pw !== W.site.pw2) return 'Пароли не совпадают';
-    }
+    if (id === 'site' && !W.site.name.trim()) return 'Введите название объекта';
     if (id === 'build') {
       const left = W.plan.map((b, i) => (W.boards[i]?.adopted ? 0 : i + 1)).filter(Boolean);
       if (left.length) return 'Ещё не подключена плата ' + left.join(', ');
     }
     if (id === 'battery') {
-      if (W.use.jkble && W.packs.length !== W.want.nbms) return `Отметьте свои BMS: ${W.want.nbms}`;
+      // None in range yet (another room, BMS asleep): go on, pick them later.
+      const jk = (W.scan || []).filter((x) => x.jk).length;
+      if (W.use.jkble && jk && W.packs.length !== Math.min(W.want.nbms, jk)) return `Отметьте свои BMS: ${Math.min(W.want.nbms, jk)}`;
       if (!(W.batt.cells >= 4 && W.batt.cap > 0)) return 'Проверьте ячейки и ёмкость';
       if (ctlBms() && !(W.batt.soc100 > W.batt.soc0)) return 'SOC 100 % должен быть выше SOC 0 %';
     }
-    if (id === 'telegram' && W.tg.token && !W.tg.chat) return 'Нажмите «Найти мой чат» или сотрите токен';
+    if (id === 'telegram' && W.tg.token.trim() && !/^\d+:[\w-]{20,}$/.test(W.tg.token.trim())) return 'Токен выглядит не так: цифры, двоеточие, буквы';
     return '';
   }
 
@@ -600,10 +748,13 @@
       `<div class="wzcap">Шаг ${W.i + 1} из ${list.length} · <b>${s.t}</b>${list[W.i + 1] ? ` <span class="muted">→ ${list[W.i + 1].t}</span>` : ''}</div>`;
     $('#wz-body').innerHTML = VIEW[s.id]();
     $('#wz-back').hidden = W.i === 0;
-    $('#wz-next').textContent = s.id === 'welcome' ? 'Начать' : s.id === 'done' ? 'Открыть Solarbox' : 'Далее';
+    $('#wz-next').textContent = s.id === 'welcome' ? 'Начать' : s.id === 'done' ? 'Открыть Solarbox'
+      : s.id === 'review' && W.review?.items.length && !W.applied ? 'Применить' : 'Далее';
+    $('#wz-skip').hidden = s.id !== 'welcome' || DEMO;
     bind();
-    if (s.id === 'build') W.plan.forEach((_, i) => simulate(i));
-    if (s.id === 'battery' && W.use.jkble && W.plan.some((p, i) => p.nb && W.boards[i]?.adopted) && W.scan === null && !scanBle.started) { scanBle.started = true; scanBle(); }
+    if (DEMO && s.id === 'build') W.plan.forEach((_, i) => simulate(i));
+    if (DEMO && s.id === 'battery' && W.use.jkble && W.plan.some((p, i) => p.nb && W.boards[i]?.adopted) && W.scan === null && !scanBle.started) { scanBle.started = true; scanBle(); }
+    save();
   }
 
   function bind() {
@@ -627,35 +778,54 @@
       const k = el.dataset.have; W.have[k] = Math.max(0, Math.min(9, W.have[k] + +el.dataset.d)); render();
     }));
     body.querySelectorAll('[data-sim]').forEach((el) => (el.onclick = () => { const i = el.dataset.sim; clearTimeout(sims[i]); sims[i] = 0; simulate(+i, true); }));
-    body.querySelectorAll('[data-adopt]').forEach((el) => (el.onclick = () => { W.boards[el.dataset.adopt].adopted = true; toast('Плата подключена (тест: в config.json не записано)'); render(); }));
-    body.querySelectorAll('[data-fw]').forEach((el) => (el.onclick = () => toast('Тестовый режим: готовых прошивок в Solarbox ещё нет', true)));
+    body.querySelectorAll('[data-adopt]').forEach((el) => (el.onclick = () => { W.boards[el.dataset.adopt].adopted = true; toast('Плата будет подключена при «Применить»'); render(); }));
+    body.querySelectorAll('[data-fw]').forEach((el) => (el.onclick = () => (DEMO ? toast('Тестовый режим: прошивка не скачивается') : firmware(W.plan[+el.dataset.fw], el))));
     body.querySelectorAll('[data-pack]').forEach((el) => (el.onchange = () => {
       const m = el.dataset.pack;
       W.packs = el.checked ? [...W.packs, m] : W.packs.filter((x) => x !== m);
       if (W.packs.length > W.want.nbms) { W.packs.shift(); toast(`Выбрано BMS на шаге «Оборудование»: ${W.want.nbms}`); }
-      // A real board reports cells and capacity from the BMS; here — plausible numbers.
-      if (W.packs.length && !W.batt.read) Object.assign(W.batt, { cells: 8, cap: 280, read: true }), (W.inv = null);
+      // Test mode: as if the BMS reported cells and capacity.
+      if (DEMO && W.packs.length && !W.batt.read) Object.assign(W.batt, { cells: 8, cap: 280, read: true }), (W.inv = null);
       render();
     }));
-    const rs = $('#wz-rescan'); if (rs) rs.onclick = () => W.plan.some((p, i) => p.nb && W.boards[i]?.adopted) && scanBle();
-    const tf = $('#wz-tgfind');
-    if (tf) tf.onclick = () => {
-      if (!/^\d+:[\w-]{20,}$/.test(W.tg.token.trim())) return toast('Токен выглядит не так: цифры, двоеточие, буквы', true);
-      $('#wz-tgmsg').textContent = 'Тестовый режим: в Telegram не обращаюсь, чат «найден»';
-      W.tg.chat = 'test';
-    };
+    const rs = $('#wz-rescan'); if (rs) rs.onclick = () => (DEMO ? W.plan.some((p, i) => p.nb && W.boards[i]?.adopted) && scanBle() : (W.scan = null, render(), poll()));
   }
 
   $('#wz-next').onclick = async () => {
     const s = cur(), err = invalid(s.id);
     if (err) return toast(err, true);
     if (s.id === 'pick') fixPlan();
-    if (s.id === 'battery' && ctlBms() && !(await SB.ask(`Записать в BMS пороги SOC 100 % = ${W.batt.soc100} В и SOC 0 % = ${W.batt.soc0} В?\n\nТестовый режим — ничего не запишется.`, { ok: 'Записать', danger: false }))) return;
-    if (s.id === 'inverter' && !(await SB.ask(`Записать в инвертор: тип ${W.inv.type}, заряд ${W.inv.bulk} В, поддержка ${W.inv.float} В, отключение ${W.inv.cut} В?\n\nТестовый режим — ничего не запишется.`, { ok: 'Записать', danger: false }))) return;
     if (s.id === 'done') { location.href = '/'; return; }
-    W.i++; render(); scrollTo(0, 0);
+    if (s.id === 'review' && !W.review) return toast('Подождите — считаю, что изменится', true);
+    if (s.id === 'review' && W.review.items.length && !W.applied) {
+      const failed = Object.values(W.results || {}).filter((x) => !x.ok).map((x) => x.id);
+      $('#wz-next').disabled = true;
+      try { await applyAll(failed.length ? failed : null); } catch (e) { toast(e.message, true); } finally { $('#wz-next').disabled = false; }
+      if (!W.applied) return;
+    }
+    W.i++;
+    if (cur().id === 'review') { W.results = null; W.applied = false; loadReview(); }
+    if (cur().id === 'done' && !DEMO) api('/api/wizard/emergency').then((r) => { W.emergency = r.password; render(); }, () => {});
+    render(); scrollTo(0, 0);
   };
-  $('#wz-back').onclick = () => { if (W.i > 0) { W.i--; render(); scrollTo(0, 0); } };
+  $('#wz-back').onclick = () => { if (W.i > 0) { W.i--; if (cur().id === 'review') loadReview(); render(); scrollTo(0, 0); } };
+  $('#wz-skip').onclick = async () => {
+    if (!(await SB.ask('Пропустить мастер? Его можно открыть позже в «Настройках».', { ok: 'Пропустить', danger: false }))) return;
+    try { await api('/api/wizard/skip', { method: 'POST' }); } catch (e) { /* the dashboard opens anyway */ }
+    location.href = '/';
+  };
 
-  render();
+  (async () => {
+    $('#wz-demo').hidden = !DEMO;
+    if (!DEMO) {
+      try {
+        const w = await api('/api/wizard');
+        if (w.draft?.ui) for (const k of KEEP) if (w.draft.ui[k] !== undefined) W[k] = w.draft.ui[k];
+      } catch (e) { toast('Черновик не загрузился: ' + e.message, true); }
+      W.i = Math.min(W.i, steps().length - 1);
+      if (cur().id === 'review') loadReview();
+    }
+    render();
+    poll();
+  })();
 })();
