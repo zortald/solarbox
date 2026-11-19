@@ -405,7 +405,11 @@ pub struct WifiBody {
 pub async fn wifi_api(State(st): State<AppState>, Json(b): Json<WifiBody>) -> Response {
     let sb = b.solarbox.clone();
     let u = st.usb.clone();
-    match tokio::task::spawn_blocking(move || u.one(|| wifi(&b.port, &b.ssid, &b.password))).await {
+    let (port, ssid) = (b.port.clone(), b.ssid.clone());
+    eprintln!("[usb] {port}: Wi-Fi «{ssid}» → board…");
+    let r = tokio::task::spawn_blocking(move || u.one(|| wifi(&b.port, &b.ssid, &b.password))).await;
+    eprintln!("[usb] {port}: Wi-Fi «{ssid}»: {}", match &r { Ok(Ok(u)) => format!("ok {u}"), Ok(Err(e)) => e.clone(), Err(e) => e.to_string() });
+    match r {
         Ok(Ok(url)) => {
             // http://10.10.0.120:80 → tell the board where Solarbox is.
             let host = url.split("://").nth(1).and_then(|h| h.split([':', '/']).next()).unwrap_or("").to_string();
