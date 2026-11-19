@@ -222,7 +222,7 @@ pub fn scan(port: &str) -> Result<Vec<(String, i32, bool)>, String> {
     let mut sp = serialport::new(format!("/dev/{port}"), 115_200).timeout(Duration::from_millis(300)).open_native().map_err(|e| format!("порт {port}: {e}"))?;
     let start = std::time::Instant::now();
     let (mut buf, mut sent, mut chunk) = (Vec::new(), None::<std::time::Instant>, [0u8; 512]);
-    while start.elapsed() < Duration::from_secs(30) {
+    while start.elapsed() < Duration::from_secs(40) {
         // The board may still be booting after the flash: ask until it answers.
         if sent.map_or(true, |t| t.elapsed() > Duration::from_secs(5)) {
             buf.clear();
@@ -233,7 +233,14 @@ pub fn scan(port: &str) -> Result<Vec<(String, i32, bool)>, String> {
             buf.extend_from_slice(&chunk[..n]);
         }
         let results: Vec<Vec<u8>> = improv_parse(&buf).into_iter().filter(|(t, d)| *t == 4 && d.first() == Some(&4)).map(|(_, d)| d).collect();
-        // The list ends with a result that carries no strings.
+        // The list ends with a result that carries no strings. An empty list
+        // right after boot means the board's scan isn't done yet: ask again.
+        if results.len() == 1 && results[0].get(1) == Some(&0) && start.elapsed() < Duration::from_secs(25) {
+            if sent.is_some_and(|t| t.elapsed() > Duration::from_secs(3)) {
+                sent = None;
+            }
+            continue;
+        }
         if results.last().is_some_and(|d| d.get(1) == Some(&0)) {
             let mut out: Vec<(String, i32, bool)> = Vec::new();
             for d in &results {
