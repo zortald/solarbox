@@ -763,6 +763,7 @@
   const since = {};     // port → when identifying / flashing progress / Wi-Fi was last seen moving
   const wifiFails = {}; // port → failed attempts (2 → offer the board's own access point)
   const wifiDone = {};  // port → when the board took the Wi-Fi
+  const wifiBusy = {};  // port → a Wi-Fi hand-over is under way (survives re-renders)
   let wantRestart = false;
 
   // Supported, identified, not set aside: [{port, key, mac}]
@@ -867,11 +868,19 @@
         : `<div class="muted"><span class="spin"></span>${{ fetching: 'Получаю прошивку…', building: 'Прошивка собирается (≈3–5 мин, один раз для всех таких плат)…', flashing: `Прошиваю… ${j.pct || 0} %`, verifying: 'Проверяю записанное…' }[j.state]}</div>`);
     }
     if (j?.state === 'failed') return head(`<p class="warn small">Прошивка не закончилась: ${esc(j.error)}. Воткните плату и нажмите ещё раз — испортить её так нельзя.</p>${flashBtn('Повторить')}`);
-    if (j?.state === 'done' || (p.solarbox && !live)) {
+    if (wifiBusy[b.usb]) return head('<div class="muted"><span class="spin"></span>Передаю плате Wi-Fi, она подключается… (до минуты)</div>');
+    // Flashed: by the job (this run of Solarbox), or — after a restart — the
+    // board answers Improv with its network list, i.e. it runs our firmware.
+    const ours = Array.isArray(nets[b.usb]) && !nets[b.usb].error;
+    if (j?.state === 'done' || (p.solarbox && !live) || ours) {
       if (wifiDone[b.usb]) return head(live ? `<div class="ok">✓ Прошита и в Wi-Fi (${esc(live.ip)}). Можно отключать от роутера и нести на место.</div>`
-        : '<div class="muted"><span class="spin"></span>Плата подключается к Wi-Fi…</div>');
-      return head(`<div class="ok">✓ Прошита${j?.version ? `: ${esc(j.target)} ${esc(j.version)}` : ''}.</div>${wifiForm(b, i)}`);
+        : Date.now() - wifiDone[b.usb] > T.appear ? '<p class="warn small">Плата взяла Wi-Fi, но к Solarbox не вышла за 5 минут. Проверьте, что сеть та, где роутер, и дайте Wi-Fi заново.</p>' + wifiForm(b, i)
+          : '<div class="muted"><span class="spin"></span>Плата подключилась к Wi-Fi, жду её в Solarbox…</div>');
+      return head(`<div class="ok">✓ Прошита${j?.version ? `: ${esc(j.target)} ${esc(j.version)}` : ' (на ней прошивка Solarbox)'}.</div>${wifiForm(b, i)}
+        ${j?.state === 'done' ? '' : `<p class="small muted"><a href="#" data-usbflashlink="${i}">Прошить заново</a> — сотрёт её настройки.</p>`}`);
     }
+    // Not known yet whether it runs Solarbox: ask it for networks quietly.
+    if (nets[b.usb] === undefined) scanNets(b.usb);
     return head(`${flashBtn('Прошить')}
       <p class="small muted">Или <a href="#" data-pcflash="${i}">прошить с компьютера</a>.</p>`);
   }
@@ -926,13 +935,14 @@
   async function usbWifi(i, btn) {
     const port = W.plan[i].usb, ssid = (W.wifi.ssid || '').trim();
     if (!ssid) return toast('Выберите сеть Wi-Fi', true);
-    btn.disabled = true; btn.textContent = 'Плата подключается… (до минуты)';
+    wifiBusy[port] = true; render();
     try {
       // The board reaches Solarbox at this router's address, plain HTTP, port 8080.
       await api('/api/usb/wifi', { json: { port, ssid, password: wifiPw, solarbox: `http://${location.hostname}:8080` } });
       wifiPw = ''; wifiDone[port] = Date.now(); wifiFails[port] = 0;
       toast('Плата в Wi-Fi');
     } catch (e) { wifiFails[port] = (wifiFails[port] || 0) + 1; toast(e.message, true); }
+    finally { delete wifiBusy[port]; }
     render();
   }
 
