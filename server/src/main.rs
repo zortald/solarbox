@@ -56,6 +56,8 @@ struct AppState {
     static_dir: PathBuf,
     /// Login, sessions, emergency password.
     auth: Arc<auth::Auth>,
+    /// Router service user, port forward, public IP.
+    access: Arc<access::Access>,
     /// Our certificate's fingerprint and key pin.
     tls: tls::Info,
     ota_busy: Arc<AtomicBool>,
@@ -122,6 +124,7 @@ async fn main() {
         )),
         static_dir: PathBuf::from(env("SOLARBOX_STATIC_DIR", "/data/static")),
         auth: Arc::new(auth::Auth::open(&data_dir)),
+        access: Arc::new(access::Access::open(&data_dir)),
         tls: tls_info,
         ota_busy: Arc::new(AtomicBool::new(false)),
         sys: Arc::new(sysinfo::Sampler::new()),
@@ -161,6 +164,7 @@ async fn main() {
     }
     state.autom.attach_db(db.clone());
     telegram::spawn_bot(state.clone());
+    access::spawn_watch(state.clone());
     {
         // Hold times / staleness need a clock even without new packets.
         let st = state.clone();
@@ -250,6 +254,10 @@ async fn main() {
         .route("/api/logout", post(auth::logout))
         .route("/api/logout-all", post(auth::logout_all))
         .route("/api/me", get(auth::me))
+        .route("/api/access", get(access::get))
+        .route("/api/access/open", post(access::open))
+        .route("/api/access/close", post(access::close))
+        .route("/api/access/service", post(access::service))
         .route("/api/config", get(files::get_config).put(files::put_config))
         .route("/api/files", get(files::list))
         .route("/api/system", get(sysinfo::system))

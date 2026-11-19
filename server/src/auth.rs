@@ -319,6 +319,7 @@ pub async fn login(State(st): State<AppState>, ConnectInfo(addr): ConnectInfo<So
     let ip = addr.ip().to_canonical();
     let ua = h.get(header::USER_AGENT).and_then(|v| v.to_str().ok()).unwrap_or("").to_string();
     let user = b.user.trim().to_string();
+    let pw_router = (!user.is_empty()).then(|| b.password.clone());
     let (a, u, pw, ua2) = (st.auth.clone(), user.clone(), b.password, ua.clone());
     let res = match tokio::task::spawn_blocking(move || a.login(&u, &pw, ip, &ua2)).await {
         Ok(r) => r,
@@ -329,6 +330,11 @@ pub async fn login(State(st): State<AppState>, ConnectInfo(addr): ConnectInfo<So
             let who = if user.is_empty() { "аварийный пароль".to_string() } else { user.clone() };
             eprintln!("[auth] login {who} from {ip}");
             crate::access::notify(&st, format!("🔑 Вход в solarbox: {who}\nIP {ip}, {}", browser(&ua)));
+            // A router login is the moment to make the read-only service user.
+            if let Some(pw) = pw_router {
+                let (acc, u) = (st.access.clone(), user.clone());
+                tokio::task::spawn_blocking(move || acc.after_login(&u, &pw));
+            }
             ([set_cookie(&token, SESSION_TTL)], Json(serde_json::json!({ "ok": true }))).into_response()
         }
         Err((e, fails)) => {

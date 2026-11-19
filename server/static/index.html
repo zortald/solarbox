@@ -31,6 +31,7 @@
       <a href="#history">История</a>
       <a href="#automations">Автоматизации</a>
       <a href="#settings">Настройки</a>
+      <a href="#access">Доступ</a>
       <button id="admin" class="btn">Выйти</button>
     </nav>
     <div id="nav-shade"></div>
@@ -136,6 +137,10 @@
       <div class="panel"><h2>Интерфейс</h2><div id="set-files"></div></div>
       <div class="panel"><h2>Конфигурация</h2><div id="set-config"></div></div>
     </section>
+
+    <section data-page="access" id="page-access" hidden>
+      <div id="access"></div>
+    </section>
   </main>
 
   <div id="toast"></div>
@@ -152,6 +157,7 @@
   <script src="/stats.js"></script>
   <script src="/settings.js"></script>
   <script src="/automations.js"></script>
+  <script src="/access.js"></script>
   <script>
     SB.start();
     // Service workers need a trusted certificate; with the self-signed one the

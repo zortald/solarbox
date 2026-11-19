@@ -61,7 +61,7 @@ const SB = (() => {
       const w = document.createElement('div');
       w.className = 'modal-wrap';
       w.innerHTML = `<div class="modal" role="dialog"><div class="mtext"></div>` +
-        (input ? '<input class="minput" type="password" autocomplete="current-password">' : '') +
+        (input === 'text' ? '<input class="minput" autocapitalize="none" spellcheck="false">' : input ? '<input class="minput" type="password" autocomplete="current-password">' : '') +
         `<div class="mbtns"><button class="btn mcancel">Отмена</button>${extra ? `<button class="btn mextra">${extra}</button>` : ''}<button class="btn mok ${danger ? 'danger' : 'on'}">${ok}</button></div></div>`;
       w.querySelector('.mtext').textContent = text;
       document.body.appendChild(w);
@@ -78,7 +78,7 @@ const SB = (() => {
     });
   }
   const ask = (text, o = {}) => modal({ text, ok: o.ok || 'OK', danger: o.danger ?? DANGER.test(text) });
-  const askText = (text, o = {}) => modal({ text, ok: o.ok || 'Войти', input: true });
+  const askText = (text, o = {}) => modal({ text, ok: o.ok || 'Войти', input: o.plain ? 'text' : true });
 
   // ---- toast ----
   function toast(t, bad) {
