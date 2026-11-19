@@ -6,6 +6,7 @@
 //
 //   GET /v1/server/<arch>[?version=vX.Y.Z]      (no version = newest tag)
 //   GET /v1/installer/<os-arch>[?version=vX.Y.Z]
+//   GET /v1/firmware/<chip>-jk<n>[?version=vX.Y.Z]   → files.bin (USB), files.ota
 //   → { status: "ready", version, files: { bin: {url, sig}, routeros?: {url, sig} } }
 //   → { status: "building", version, run }      poll again in ~15 s
 //   → { status: "failed", version, run }        the last build for it failed
@@ -15,6 +16,9 @@
 export const KINDS = {
   server: ['armv5', 'armv7', 'arm64', 'x86_64', 'mips', 'mipsel'],
   installer: ['linux-x86_64', 'linux-arm64', 'macos-arm64', 'macos-x86_64', 'windows-x86_64', 'windows-arm64', 'android-arm64'],
+  // Board images: <chip>-jk<BMS slots>; `bin` is for the first flash over
+  // USB, `ota` for updates over the air.
+  firmware: ['c3-jk1', 'c3-jk2', 's3-jk1', 's3-jk2', 's3-jk3', 'esp32-jk1', 'esp32-jk2', 'esp32-jk3'],
 };
 const ROUTEROS = new Set(['armv5', 'armv7', 'arm64', 'x86_64']);
 const VERSION = /^v\d+\.\d+\.\d+$/;
@@ -45,9 +49,14 @@ export function readyFiles(assets, kind, arch) {
   const by = Object.fromEntries(assets.map((a) => [a.name, a.browser_download_url]));
   const pair = (name) => (by[name] && by[name + '.sig'] ? { url: by[name], sig: by[name + '.sig'] } : null);
   const base = `solarbox-${kind}-${arch}`;
-  const bin = pair(base + (arch.startsWith('windows') ? '.exe' : ''));
+  const bin = pair(base + (arch.startsWith('windows') ? '.exe' : kind === 'firmware' ? '.bin' : ''));
   if (!bin) return null;
   const files = { bin };
+  if (kind === 'firmware') {
+    const ota = pair(base + '.ota.bin');
+    if (!ota) return null;
+    files.ota = ota;
+  }
   if (kind === 'server' && ROUTEROS.has(arch)) {
     const ros = pair(base + '.routeros.tar');
     if (!ros) return null;

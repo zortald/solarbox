@@ -12,9 +12,9 @@ on:
     inputs:
       kind:
         type: choice
-        options: [server, installer]
+        options: [server, installer, firmware]
       arch:
-        description: "server: armv5 armv7 arm64 x86_64 mips mipsel · installer: linux-x86_64 linux-arm64 macos-arm64 macos-x86_64 windows-x86_64 windows-arm64 android-arm64"
+        description: "server: armv5 armv7 arm64 x86_64 mips mipsel · installer: linux-x86_64 linux-arm64 macos-arm64 macos-x86_64 windows-x86_64 windows-arm64 android-arm64 · firmware: <chip>-jk<n> (c3-jk1 c3-jk2 s3-jk1..3 esp32-jk1..3)"
         required: true
       version:
         description: release tag, e.g. v0.1.0
@@ -43,12 +43,13 @@ jobs:
             "server armv5"|"server armv7"|"server arm64"|"server x86_64"|"server mips"|"server mipsel") ;;
             "installer linux-x86_64"|"installer linux-arm64"|"installer macos-arm64"|"installer macos-x86_64") ;;
             "installer windows-x86_64"|"installer windows-arm64"|"installer android-arm64") ;;
+            "firmware c3-jk1"|"firmware c3-jk2"|"firmware s3-jk1"|"firmware s3-jk2"|"firmware s3-jk3"|"firmware esp32-jk1"|"firmware esp32-jk2"|"firmware esp32-jk3") ;;
             *) echo "unknown: ${{ inputs.kind }} ${{ inputs.arch }}"; exit 1 ;;
           esac
       - name: already built?
         id: have
         run: |
-          if gh release view "$TAG" -R "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name' 2>/dev/null | grep -Eq "^$ASSET(\.exe)?\.sig$"; then
+          if gh release view "$TAG" -R "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name' 2>/dev/null | grep -Eq "^$ASSET(\.exe|\.bin)?\.sig$"; then
             echo "done=true" >> "$GITHUB_OUTPUT"; echo "$ASSET is in $TAG already"
           fi
 
@@ -70,7 +71,29 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         if: ${{ inputs.kind == 'installer' && !startsWith(inputs.arch, 'linux') }}
       - name: build
+        if: ${{ inputs.kind != 'firmware' }}
         run: ./deploy/ci-build-${{ inputs.kind }}.sh "${{ inputs.arch }}" dist
+      # Board firmware: the generator states what is flashed and for what,
+      # the official ESPHome action builds it (version pinned).
+      - name: generate firmware
+        if: ${{ inputs.kind == 'firmware' }}
+        run: |
+          chip=${ARCH%-jk*}; n=${ARCH##*-jk}
+          mkdir -p fw && python3 firmware/gen-jk-ble.py "$n" "$chip" "fw/$ASSET.yaml"
+        env: { ARCH: "${{ inputs.arch }}" }
+      - uses: esphome/build-action@v7
+        if: ${{ inputs.kind == 'firmware' }}
+        id: esphome
+        with:
+          yaml-file: fw/${{ env.ASSET }}.yaml
+          version: 2026.10.2
+      - name: collect firmware
+        if: ${{ inputs.kind == 'firmware' }}
+        run: |
+          mkdir -p dist; ls -lR "${{ steps.esphome.outputs.name }}"
+          cp "$(find "${{ steps.esphome.outputs.name }}" -name '*factory*.bin' | head -1)" "dist/$ASSET.bin"
+          cp "$(find "${{ steps.esphome.outputs.name }}" -name '*ota*.bin' | head -1)" "dist/$ASSET.ota.bin"
+          ls -l dist
       - uses: actions/upload-artifact@v4
         with: { name: dist, path: dist/ }
 

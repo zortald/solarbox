@@ -84,5 +84,14 @@ test('installer: per OS, .exe on Windows, no RouterOS image', async () => {
   assert.equal((await body(await artifact(g2, 'installer', 'macos-arm64', ''))).status, 'building');
   assert.deepEqual(g2.dispatched, [{ kind: 'installer', arch: 'macos-arm64', version: 'v0.1.0' }]);
   assert.equal((await artifact(g2, 'installer', 'armv5', '')).status, 400);
-  assert.equal((await artifact(g2, 'firmware', 'x', '')).status, 404);
+  assert.equal((await artifact(g2, 'bootloader', 'x', '')).status, 404);
+});
+
+test('firmware: factory and OTA image, both signed', async () => {
+  const names = ['solarbox-firmware-s3-jk2.bin', 'solarbox-firmware-s3-jk2.bin.sig', 'solarbox-firmware-s3-jk2.ota.bin', 'solarbox-firmware-s3-jk2.ota.bin.sig'];
+  const r = await body(await artifact(fake({ assets: names.map(asset) }), 'firmware', 's3-jk2', 'v0.1.0'));
+  assert.equal(r.status, 'ready');
+  assert.equal(r.files.ota.url, 'https://dl/solarbox-firmware-s3-jk2.ota.bin');
+  assert.equal(readyFiles(names.slice(0, 2).map(asset), 'firmware', 's3-jk2'), null); // OTA image missing
+  assert.equal((await artifact(fake(), 'firmware', 'c3-jk3', '')).status, 400);         // C3 carries 2
 });

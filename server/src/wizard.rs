@@ -268,7 +268,10 @@ pub async fn apply(State(st): State<AppState>, Json(b): Json<ApplyBody>) -> Resp
         }
         results.push(json!({ "id": it.id, "ok": r.is_ok(), "error": r.err() }));
     }
-    let left = plan(&st, &st.wizard.get().draft).len();
+    // What a board reports back arrives with its next packet (≈5 s); what
+    // was just written successfully counts as done meanwhile.
+    let ok: Vec<&str> = results.iter().filter(|r| r["ok"] == true).filter_map(|r| r["id"].as_str()).collect();
+    let left = plan(&st, &st.wizard.get().draft).iter().filter(|i| !ok.contains(&i.id.as_str())).count();
     if left == 0 {
         let _ = st.wizard.put(|s| s.state = "done".into());
     }
