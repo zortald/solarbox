@@ -1,5 +1,6 @@
-# Checks on every push: server tests, the armv5 router build (catches crypto
-# backends that don't build there), JS syntax, generated firmware up to date.
+# Checks on every push: server tests, the server built for every router/box
+# architecture, one board image via esphome/build-action, JS syntax, generated
+# firmware up to date.
 name: ci
 on: [push, pull_request]
 
@@ -13,12 +14,46 @@ jobs:
       - run: cargo test --release
         working-directory: server
 
-  armv5:
+  # Static musl server binary for every router/box architecture. armv5 =
+  # EN7562CT routers (catches crypto backends that don't build there). mips is
+  # tier 3 in Rust (no prebuilt std): nightly + build-std, an experiment.
+  cross:
+    runs-on: ubuntu-latest
+    continue-on-error: ${{ matrix.experimental }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { tool: armv5te-musleabi, target: armv5te-unknown-linux-musleabi, experimental: false }
+          - { tool: armv7-musleabihf, target: armv7-unknown-linux-musleabihf, experimental: false }
+          - { tool: aarch64-musl, target: aarch64-unknown-linux-musl, experimental: false }
+          - { tool: x86_64-musl, target: x86_64-unknown-linux-musl, experimental: false }
+          - { tool: mips-musl, target: mips-unknown-linux-musl, experimental: true }
+          - { tool: mipsel-musl, target: mipsel-unknown-linux-musl, experimental: true }
+    name: cross (${{ matrix.target }})
+    steps:
+      - uses: actions/checkout@v4
+      - name: build
+        run: |
+          if [ "${{ matrix.experimental }}" = true ]; then
+            CMD="rustup toolchain install nightly --profile minimal --component rust-src && cargo +nightly build --release -Zbuild-std=std,panic_abort --target ${{ matrix.target }}"
+          else
+            CMD="cargo build --release"
+          fi
+          docker run --rm -v "$PWD/server":/src -w /src messense/rust-musl-cross:${{ matrix.tool }} sh -c "$CMD"
+      - name: size
+        run: ls -l server/target/${{ matrix.target }}/release/solarbox && file server/target/${{ matrix.target }}/release/solarbox
+
+  # One board image through the official ESPHome build action (the path
+  # on-demand builds will take).
+  firmware:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: cross-compile for armv5 (EN7562CT routers)
-        run: docker run --rm -v "$PWD/server":/src -w /src messense/rust-musl-cross:armv5te-musleabi cargo build --release
+      - uses: esphome/build-action@v7
+        with:
+          yaml-file: firmware/jk-ble.yaml
+          version: 2026.10.2
 
   ui-firmware:
     runs-on: ubuntu-latest
