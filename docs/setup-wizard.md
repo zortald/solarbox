@@ -170,12 +170,20 @@ which really cuts the board's power):
 - started without the board, the node does not appear when it is plugged
   in later: a container restart (board present) brings it.
 
-So: the installer assigns the router's USB to the container when a board is
-plugged in during the install; otherwise the wizard does it the first time a
-board is plugged in (the router's REST shows the port as active even to the
-read-only user; setting `devices` needs the owner's router password once, as
-«Доступ» does). Solarbox polls the port; with the assignment in place and
-no node yet it restarts itself (exit → restart-policy) to pick the board up.
+Passing the whole USB controller instead (`/system/resource/hardware` lists it
+as `1-0`, "MU3H xHCI Host Controller"; the Wi-Fi chips there are PCI and are
+never passed): accepted with nothing plugged in, the container gets
+`/dev/bus/usb/001/001` plus a node for every device present at its start;
+unplug/replug of those works live. A board plugged in later shows up in the
+container's `/sys/class/tty` (`ttyACM0`, `166:0`) but gets no node, and
+`mknod` is not permitted (non-privileged container).
+
+So, the design: the installer passes the USB controller (always there, no
+board needed, no pinning, no router write rights later). Solarbox watches
+`/sys/class/tty`; a port there without a node → it exits and restart-policy
+brings it back (≈10 s) with the node; then it offers the board in the wizard
+(chip, MAC) and flashes it. Unverified: whether passing the controller
+affects other USB use of the router (storage, LTE modems).
 
 Not checked yet: CH340/CP210x boards (D1 mini, ESP32 DevKit), and whether
 another board in the same port keeps the same device reference. OpenWrt and
