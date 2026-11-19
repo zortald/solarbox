@@ -39,7 +39,10 @@
     24: { m: 'LM2596 (вход до 40 В)', max: 29.2 },
     48: { m: 'XL7015 (вход 5–80 В)', max: 58.4 },
   };
-  const tested = (b) => (b.chip === 'd1' && b.inv && !b.nb) || (b.chip === 'c3' && !b.inv && b.nb === 1);
+  // Runs on a real site: a C3 with one JK BMS (the BMS board of site 1).
+  const tested = (b) => b.chip === 'c3' && !b.inv && b.nb === 1;
+  // ESP8266 (D1 mini) is not supported: no Bluetooth, and the flasher speaks ESP32 only.
+  const KINDS = ['esp32', 's3', 'c3'];
   const can = (chip, inv, nb) => { const c = CHIPS[chip]; return (!inv || c.inv) && nb <= (inv ? c.bleInv : c.ble); };
 
   const W = {
@@ -58,7 +61,7 @@
     inv: null,
     tg: { token: '' },
     money: { day: '', night: false, nday: '', from: 23, to: 7 },
-    usbUse: {},          // USB port of the router → chip key, boards chosen on «Платы»
+    usbSkip: {},         // USB ports of the router the owner said not to use
     wifi: { ssid: '' },  // network for boards flashed from the router (password not kept)
   };
 
@@ -99,29 +102,36 @@
 
   // ---- boards: recommendation, and a plan from what the owner has ----
   // Missing parts are bought: inverter + up to 3 BMS → one ESP32; otherwise
-  // D1 mini for the inverter, ESP32-C3 per 2 BMS (ESP32 for an odd 3).
+  // ESP32-C3 for the inverter, ESP32-C3 per 2 BMS (ESP32 for an odd 3).
   function buyFor(inv, nb) {
     const out = [];
     if (inv && nb && nb <= 3) return [{ chip: 'esp32', inv: true, nb }];
-    if (inv) out.push({ chip: 'd1', inv: true, nb: 0 });
+    if (inv) out.push({ chip: 'c3', inv: true, nb: 0 });
     while (nb > 0) { const k = nb === 3 ? 3 : Math.min(2, nb); out.push({ chip: k === 3 ? 'esp32' : 'c3', inv: false, nb: k }); nb -= k; }
     return out;
   }
+  // Boards at hand = the ones plugged into the router's USB (used first,
+  // each tied to its port) + the ones the owner says are in a drawer.
   function fromStock() {
     let { inv, nb } = need();
-    const left = Object.assign({}, W.have), out = [];
-    const take = (chip, i, n) => { left[chip]--; out.push({ chip, inv: i, nb: n, own: true }); };
+    const plugged = usbBoards(), left = {}, out = [];
+    for (const k of KINDS) left[k] = (W.have[k] || 0) + plugged.filter((x) => x.key === k).length;
+    const take = (chip, i, n) => {
+      left[chip]--;
+      const u = plugged.findIndex((x) => x.key === chip);
+      out.push(Object.assign({ chip, inv: i, nb: n, own: true }, u >= 0 ? { usb: plugged.splice(u, 1)[0].port } : {}));
+    };
     // One board for everything, if any of them can — the smallest that does.
-    for (const chip of ['d1', 'c3', 'esp32', 's3']) if (left[chip] > 0 && can(chip, inv, nb)) { take(chip, inv, nb); return { boards: out, one: true }; }
-    // Inverter: D1 mini first (keeps Bluetooth boards for BMS), else a board that also takes some BMS.
+    for (const chip of ['c3', 'esp32', 's3']) if (left[chip] > 0 && can(chip, inv, nb)) { take(chip, inv, nb); return { boards: out, one: true }; }
+    // Inverter: a board that also takes as many BMS as it can.
     if (inv) {
-      const chip = left.d1 > 0 ? 'd1' : ['esp32', 's3', 'c3'].find((c) => left[c] > 0);
+      const chip = ['s3', 'esp32', 'c3'].find((c) => left[c] > 0);
       if (chip) { const n = Math.min(nb, CHIPS[chip].bleInv); take(chip, true, n); nb -= n; inv = false; }
     }
     for (const chip of ['esp32', 's3', 'c3']) while (nb > 0 && left[chip] > 0) { const n = Math.min(nb, CHIPS[chip].ble); take(chip, false, n); nb -= n; }
     return { boards: out.concat(buyFor(inv, nb)), one: false };
   }
-  const anyStock = () => ['esp32', 's3', 'c3', 'd1'].some((c) => W.have[c] > 0);
+  const anyStock = () => KINDS.some((c) => W.have[c] > 0) || usbBoards().length > 0;
   const roles = (b) => [b.inv && 'инвертор', b.nb && (b.nb === 1 ? '1 BMS' : b.nb + ' BMS')].filter(Boolean).join(' + ');
 
   // What one board of this chip can do for the chosen equipment.
@@ -205,8 +215,9 @@
         ${W.power.src === 'inv' && need().nb && !(rec.length === 1) ? '<p class="muted small">Платы только для BMS к инвертору не подключены — им USB-блок питания.</p>' : ''}
       </div>
       <div class="panel">
-        <h2>Что уже есть</h2>
-        ${['esp32', 's3', 'c3', 'd1'].map((k) => {
+        <h2>Что ещё есть</h2>
+        <p class="muted small">Помимо воткнутых в USB роутера — платы в ящике.</p>
+        ${KINDS.map((k) => {
           const v = W.have[k] ? verdict(k) : null;
           return `<div class="wzhave"><span><b>${CHIPS[k].t}</b>${v ? `<small class="${v[0]}">${v[1]}</small>` : ''}</span>${stepper(k)}</div>`;
         }).join('')}
@@ -375,7 +386,9 @@
     const parts = kit([b]), sec = 2 + (b.inv ? 1 : 0) + (pwrSrc(b) !== 'inv' ? 1 : 0);
     const t = fwTarget(b), have = FIRMWARE.includes(t);
     // The image comes first: without it the board never shows up below.
-    const fwBox = b.usb && usbTarget(b) ? usbBox(b, i) : have
+    // A board in the router's USB is flashed from there; the download is the
+    // spare way («прошить с компьютера»).
+    const fwBox = b.usb && usbTarget(b) && !pcFlash[i] ? usbBox(b, i) : have
       ? `<div class="wzfw"><div><b>Прошивка для этой платы</b><small class="muted"><code>solarbox-firmware-${t}.bin</code> — собирается один раз для всех таких плат, потом сразу</small></div>
           <button class="btn on" data-fw="${i}">Скачать прошивку</button></div>`
       : `<div class="wzfw warn"><div><b>Прошивки для такой платы пока нет</b><small>${b.inv ? 'Драйвер инвертора PI30 ещё в работе — плата для инвертора пока не прошивается из Solarbox.' : 'Такое сочетание платы и числа BMS не собирается.'}
@@ -603,7 +616,7 @@
   }
 
   // ---- the server: draft, discovered boards, plan ----
-  const KEEP = ['i', 'want', 'power', 'have', 'plan', 'boards', 'site', 'packs', 'batt', 'inv', 'tg', 'money', 'usbUse', 'wifi'];
+  const KEEP = ['i', 'want', 'power', 'have', 'plan', 'boards', 'site', 'packs', 'batt', 'inv', 'tg', 'money', 'usbSkip', 'wifi'];
   // Device names in Solarbox, in order over all BMS boards: bms, bms2, bms3…
   function draft() {
     const ui = {};
@@ -736,105 +749,185 @@
     return W.applied;
   }
 
-  // ---- boards in the router's USB: pick on «Платы», flash on «Сборка» ----
-  // espflash chip name → our board key.
-  const CHIP_KEY = { esp32s3: 's3', esp32c3: 'c3', esp32: 'esp32', esp8266: 'd1' };
+  // ---- boards in the router's USB ----
+  // Plugged and supported = used (Q: «воткнул — значит, используешь»). The
+  // card's state is worked out from facts every time — what is in the USB,
+  // what the server's flash job says, what talks to Solarbox on the network —
+  // so a reload, a Solarbox restart or a pulled cable can't confuse it.
+  const CHIP_KEY = { esp32s3: 's3', esp32c3: 'c3', esp32: 'esp32' };
+  const pcFlash = {}; // plan index → owner chose to flash it from a computer
+  const T = { identify: 20e3, flash: 120e3, wifi: 60e3, appear: 300e3 }; // «застряло» after this
   let usb = { ports: [] }, usbBusy = false, restarting = false, wifiPw = '';
+  const nets = {};      // port → networks the board sees (its own scan) | 'scanning'
+  const since = {};     // port → when identifying / flashing progress / Wi-Fi was last seen moving
+  const wifiFails = {}; // port → failed attempts (2 → offer the board's own access point)
+  const wifiDone = {};  // port → when the board took the Wi-Fi
+  let wantRestart = false;
+
+  // Supported, identified, not set aside: [{port, key, mac}]
+  function usbBoards() {
+    return usb.ports.filter((p) => p.board && CHIP_KEY[p.board.chip] && !W.usbSkip[p.port])
+      .map((p) => ({ port: p.port, key: CHIP_KEY[p.board.chip], mac: p.board.mac }));
+  }
+  const portMac = (p) => (p?.board?.mac || p?.serial || '').toUpperCase();
+  const online = (mac) => mac && disc.find((d) => d.mac === mac && d.age < 120);
+
   async function pollUsb() {
     if (DEMO || !['pick', 'build'].includes(cur().id) || usbBusy) return;
     usbBusy = true;
     try {
-      usb = await api('/api/usb');
+      const fresh = await api('/api/usb');
       restarting = false;
-      // A board plugged in after Solarbox started: it restarts to reach it.
-      if (usb.restart_needed) {
-        restarting = true;
+      for (const p of fresh.ports) { const o = usb.ports.find((x) => x.port === p.port); if (o) { p.tried = o.tried; p.error = p.board ? null : o.error; } }
+      usb = fresh;
+      // A board plugged in after Solarbox started: it restarts to reach it (≈10 s).
+      if (usb.restart_needed && !wantRestart) {
+        wantRestart = restarting = true;
         await api('/api/usb/restart', { method: 'POST' }).catch(() => {});
-      } else {
+      } else if (!usb.restart_needed) {
+        wantRestart = false;
         const p = usb.ports.find((x) => x.node && !x.board && !x.tried);
         if (p) {
-          p.tried = true; render();
+          p.tried = Date.now(); render();
           try { p.board = (await api('/api/usb/identify', { json: { port: p.port } })).board; }
           catch (e) { p.error = e.message; }
-          usb = Object.assign(await api('/api/usb'), {});
         }
       }
     } catch (e) {
-      if (!restarting) usb.error = e.message; // during a restart the server is away for ≈10 s
+      if (!wantRestart) usb.error = e.message; // during the restart the server is away for a moment
+      else restarting = true;
     } finally { usbBusy = false; }
-    // Unplugged boards drop out of the choice.
-    for (const port of Object.keys(W.usbUse)) if (!usb.ports.some((x) => x.port === port)) delete W.usbUse[port];
-    if (!document.activeElement || !document.activeElement.matches('input')) render();
+    bindPlugged();
+    if (!document.activeElement || !document.activeElement.matches('input, select')) render();
   }
   setInterval(pollUsb, 3000);
 
-  function usbPanel() {
-    if (DEMO) return '';
-    const rows = usb.ports.map((p) => {
-      const b = p.board, key = b && CHIP_KEY[b.chip], used = W.usbUse[p.port];
-      const what = b ? `${CHIPS[key]?.t || b.chip} · ${b.flash} · MAC ${esc(b.mac)}` : esc(p.kind) + (p.serial ? ` · ${esc(p.serial)}` : '');
-      const state = restarting ? '<span class="spin"></span>подключаюсь к новой плате (≈10 с)…'
-        : p.error ? `<span class="warn">${esc(p.error)}</span>`
-          : !b ? '<span class="spin"></span>опознаю…' : '';
-      return `<div class="wzbrow"><span class="wznum">USB</span><span><b>${what}</b><small class="muted">${state || esc(p.product || '')}</small></span>
-        ${key ? `<button class="btn ${used ? 'on' : ''}" data-usbuse="${p.port}" data-chip="${key}">${used ? 'Используется' : 'Использовать'}</button>` : ''}</div>`;
-    }).join('');
-    return `<div class="panel"><h2>Воткнуто в USB роутера</h2>
-      ${rows || '<p class="muted small">Ничего. Воткните плату в USB роутера — Solarbox сам её опознает, прошьёт и даст ей Wi-Fi; потом её можно отключить и нести к инвертору.</p>'}
-      ${rows ? '<p class="muted small">Выбранные платы считаются «уже есть» и прошиваются прямо с роутера на шаге «Сборка».</p>' : ''}</div>`;
-  }
-  // «Что уже есть» counts the chosen USB boards too.
-  function useUsb(port, key) {
-    if (W.usbUse[port]) delete W.usbUse[port]; else W.usbUse[port] = key;
-    const n = Object.values(W.usbUse).filter((k) => k === key).length;
-    if (W.usbUse[port] ? W.have[key] < n : W.have[key] > 0) W.have[key] += W.usbUse[port] ? 1 : -1;
-    render();
+  // Plugged in on «Сборка»: take the planned board of that chip that has no board yet.
+  function bindPlugged() {
+    if (cur().id !== 'build') return;
+    const used = new Set(W.plan.map((b) => b.usb).filter(Boolean));
+    for (const u of usbBoards()) {
+      if (used.has(u.port)) continue;
+      const b = W.plan.find((x) => !x.usb && x.chip === u.key && !W.boards[W.plan.indexOf(x)]?.found);
+      if (b) { b.usb = u.port; b.own = true; used.add(u.port); }
+    }
   }
 
-  // On the board's card: flash it right from the router, then its Wi-Fi.
+  // «Платы»: what is in the router's USB and what each one is for.
+  function usbPanel() {
+    if (DEMO) return '';
+    const plan = anyStock() ? fromStock().boards : [];
+    const rows = usb.ports.map((p) => {
+      const b = p.board, key = b && CHIP_KEY[b.chip], k = plan.findIndex((x) => x.usb === p.port), sb = p.solarbox;
+      const what = b ? `${CHIPS[key]?.t || b.chip.toUpperCase()} · ${b.flash} · MAC ${esc(b.mac)}` : esc(p.kind) + (p.serial ? ` · ${esc(p.serial)}` : '');
+      let note, btn = '';
+      if (restarting && !p.node) note = '<span class="spin"></span>подключаюсь к новой плате (≈10 с)…';
+      else if (p.error) note = `<span class="warn">${esc(p.error)}</span> <button class="btn xs" data-usbretry="${p.port}">Повторить</button>`;
+      else if (!b) note = Date.now() - (p.tried || Date.now()) > T.identify
+        ? '<span class="warn">не отвечает — другой кабель или порт; не помогло — зажмите на плате BOOT и нажмите «Повторить»</span>' : '<span class="spin"></span>опознаю…';
+      else if (!key) note = '<span class="warn">не поддерживается — нужна ESP32-C3, ESP32-S3 или ESP32</span>';
+      else if (W.usbSkip[p.port]) { note = 'не используется'; btn = `<button class="btn xs" data-usbskip="${p.port}">Использовать</button>`; }
+      else {
+        note = k >= 0 ? `плата ${k + 1}: ${roles(plan[k])}` : 'лишняя — для плана хватает других';
+        btn = `<button class="btn xs" data-usbskip="${p.port}">Не использовать</button>`;
+      }
+      if (sb && key) note += ` · уже с прошивкой Solarbox ${esc(sb.fw)}${sb.age < 120 ? ', в сети' : ''}`;
+      if (!p.tested) note += ' · <span class="muted">такой USB ещё не проверен</span>';
+      return `<div class="wzbrow"><span class="wznum">USB</span><span><b>${what}</b><small class="muted">${note}</small></span>${btn}</div>`;
+    }).join('');
+    return `<div class="panel"><h2>Воткнуто в USB роутера</h2>
+      ${rows || '<p class="muted small">Ничего. Воткните плату в USB роутера — Solarbox сам её опознает, прошьёт и даст ей Wi-Fi; потом её можно отключить и нести на место.</p>'}
+      ${rows ? '<p class="muted small">Воткнутые платы идут в план первыми. Остальное — из «что уже есть» или купить.</p>' : ''}</div>`;
+  }
+
+  // «Сборка»: the board's way from the USB to the network, one main button at a time.
   function usbBox(b, i) {
-    const p = usb.ports.find((x) => x.port === b.usb), j = p?.job, t = usbTarget(b), st = W.boards[i] || {};
-    const partial = t !== fwTarget(b) ? '<p class="small warn">Прошивки с инвертором пока нет (драйвер PI30 в работе). Сейчас плата прошьётся для BMS, инвертор добавится обновлением по воздуху — перепрошивать через USB не придётся.</p>' : '';
-    if (!p) return `<div class="wzfw warn"><div><b>Плату вынули из USB роутера</b><small>Воткните её обратно — продолжим с того же места.</small></div></div>`;
-    let body;
-    if (st.wifi) body = `<div class="ok">✓ Прошита и в Wi-Fi${st.wifi !== true ? `: ${esc(st.wifi)}` : ''}. Можно отключать от роутера и нести на место — дальше она появится ниже сама.</div>`;
-    else if (j?.state === 'done') body = `<div class="ok">✓ Прошита: ${esc(j.target)} ${esc(j.version)}.</div>
-      <div class="wzrow"><label class="wzf"><span>Wi-Fi для платы — сеть</span><input data-k="wifi.ssid" value="${esc(W.wifi.ssid)}" autocomplete="off"></label>
-        <label class="wzf"><span>Пароль</span><input id="wz-wifipw" type="password" autocomplete="off" value="${esc(wifiPw)}"></label></div>
-      <button class="btn on" data-usbwifi="${i}">Дать плате Wi-Fi</button>
-      <p class="muted small">Сеть — та, что будет у платы на месте установки. Пароль уйдёт в плату, Solarbox его не хранит.</p>`;
-    else if (j && ['fetching', 'building', 'flashing', 'verifying'].includes(j.state)) body = `<div class="muted"><span class="spin"></span>${
-      { fetching: 'Получаю прошивку…', building: 'Прошивка собирается (≈3–5 мин, один раз для всех таких плат)…', flashing: `Прошиваю… ${j.pct || 0} %`, verifying: 'Проверяю записанное…' }[j.state]}</div>`;
-    else body = `${j?.state === 'failed' ? `<p class="warn small">Не получилось: ${esc(j.error)}</p>` : ''}
-      <button class="btn on" data-usbflash="${i}">Прошить</button>`;
-    return `<div class="wzfw"><div style="flex:1"><b>Плата в USB роутера</b><small class="muted">${esc(p.board?.mac || p.serial || p.port)} · прошивка <code>${t}</code> прямо с роутера</small>${partial}${body}</div></div>`;
+    const p = usb.ports.find((x) => x.port === b.usb), t = usbTarget(b), j = p?.job, st = W.boards[i] || {};
+    const mac = portMac(p) || st.found?.mac, live = online(mac);
+    const head = (s) => `<div class="wzfw"><div style="flex:1"><b>Плата в USB роутера</b><small class="muted">${esc(mac || b.usb)} · прошивка <code>${t}</code></small>${partial}${s}</div></div>`;
+    const partial = t !== fwTarget(b) ? '<p class="small warn">Прошивки с инвертором для неё нет — прошьётся для BMS, инвертор добавится обновлением по воздуху.</p>' : '';
+    if (!p) {
+      if (live) return ''; // carried away and on the network: the card below takes over
+      if (wifiDone[b.usb] || j?.state === 'done') return head(Date.now() - (wifiDone[b.usb] || Date.now()) > T.appear
+        ? '<p class="warn small">Плата не появилась в сети за 5 минут. Включена ли она, ловит ли Wi-Fi на месте? Можно вернуть её в USB роутера и дать Wi-Fi заново.</p>'
+        : '<div class="muted"><span class="spin"></span>Плату вынули — жду её в сети…</div>');
+      return head('<p class="warn small">Плату вынули из USB роутера. Воткните её обратно — продолжим с того же места.</p>');
+    }
+    const flashBtn = (label) => `<button class="btn on" data-usbflash="${i}">${label}</button>`;
+    // Running Solarbox already and on the network: nothing to do but carry it.
+    if (p.solarbox && live && !(j && ['fetching', 'building', 'flashing', 'verifying'].includes(j.state)))
+      return head(`<div class="ok">✓ Уже с прошивкой Solarbox ${esc(p.solarbox.fw)} и в сети (${esc(live.ip)}). Можно отключать и нести на место.</div>
+        <p class="small"><button class="btn xs" data-usbflash="${i}">Прошить заново</button> <span class="muted">обычно не нужно: обновляется по воздуху</span></p>`);
+    if (j && ['fetching', 'building', 'flashing', 'verifying'].includes(j.state)) {
+      const key = j.state + (j.pct || 0);
+      if (since[b.usb]?.key !== key) since[b.usb] = { key, at: Date.now() };
+      const stuck = j.state !== 'building' && Date.now() - since[b.usb].at > T.flash;
+      return head(stuck ? `<p class="warn small">Прошивка не двигается 2 минуты — похоже, оборвалась.</p>${flashBtn('Повторить')}`
+        : `<div class="muted"><span class="spin"></span>${{ fetching: 'Получаю прошивку…', building: 'Прошивка собирается (≈3–5 мин, один раз для всех таких плат)…', flashing: `Прошиваю… ${j.pct || 0} %`, verifying: 'Проверяю записанное…' }[j.state]}</div>`);
+    }
+    if (j?.state === 'failed') return head(`<p class="warn small">Прошивка не закончилась: ${esc(j.error)}. Воткните плату и нажмите ещё раз — испортить её так нельзя.</p>${flashBtn('Повторить')}`);
+    if (j?.state === 'done' || (p.solarbox && !live)) {
+      if (wifiDone[b.usb]) return head(live ? `<div class="ok">✓ Прошита и в Wi-Fi (${esc(live.ip)}). Можно отключать от роутера и нести на место.</div>`
+        : '<div class="muted"><span class="spin"></span>Плата подключается к Wi-Fi…</div>');
+      return head(`<div class="ok">✓ Прошита${j?.version ? `: ${esc(j.target)} ${esc(j.version)}` : ''}.</div>${wifiForm(b, i)}`);
+    }
+    return head(`${flashBtn('Прошить')}
+      <p class="small muted">Или <a href="#" data-pcflash="${i}">прошить с компьютера</a>.</p>`);
+  }
+
+  // The board scans the air itself; a list, not a text field — browsers took
+  // «network + password» for a login form and filled in the router's.
+  function wifiForm(b, i) {
+    const n = nets[b.usb];
+    if (!n) scanNets(b.usb);
+    if (!n || n === 'scanning') return '<div class="muted"><span class="spin"></span>Плата ищет сети Wi-Fi вокруг себя…</div>';
+    const other = !!W.wifi.other;
+    if (!other && W.wifi.ssid && !n.some((x) => x.ssid === W.wifi.ssid)) W.wifi.ssid = '';
+    const ap = (wifiFails[b.usb] || 0) >= 2
+      ? '<p class="small warn">Не выходит дважды. Другой способ: плата раздаёт точку <code>solarbox-XXXX</code> — подключитесь к ней с телефона и выберите сеть там; плата появится ниже сама.</p>' : '';
+    return `<div class="wzrow"><label class="wzf"><span>Wi-Fi для платы</span><select id="wz-wifissid">
+        <option value="">— выберите сеть —</option>
+        ${n.map((x) => `<option value="${esc(x.ssid)}" ${!other && x.ssid === W.wifi.ssid ? 'selected' : ''}>${esc(x.ssid)} · ${x.rssi} дБм${x.secured ? '' : ' · открытая'}</option>`).join('')}
+        <option value="\u0000other" ${other ? 'selected' : ''}>Другая сеть…</option></select>
+        ${n.error ? `<small class="warn">${esc(n.error)}</small>` : ''}</label>
+      ${other ? `<label class="wzf"><span>Имя сети</span><input id="wz-wifiother" value="${esc(W.wifi.ssid)}" autocomplete="off" data-lpignore="true" data-1p-ignore></label>` : ''}
+      <label class="wzf"><span>Пароль Wi-Fi</span><input id="wz-wifipw" type="password" autocomplete="new-password" data-lpignore="true" data-1p-ignore value="${esc(wifiPw)}"></label></div>
+      <div class="row"><button class="btn on" data-usbwifi="${i}">Дать плате Wi-Fi</button><button class="btn" data-rescan="${b.usb}">Искать ещё раз</button></div>
+      <p class="muted small">Плата видит сети здесь, у роутера; на месте нужна та, что ловится там. Пароль уйдёт в плату, Solarbox его не хранит.</p>${ap}`;
+  }
+
+  async function scanNets(port) {
+    if (nets[port] === 'scanning') return;
+    nets[port] = 'scanning';
+    try { nets[port] = (await api('/api/usb/scan', { json: { port } })).networks; }
+    catch (e) { nets[port] = Object.assign([], { error: e.message }); }
+    render();
   }
   async function usbFlash(i) {
     const b = W.plan[i];
+    delete wifiDone[b.usb]; delete nets[b.usb];
     try {
       await api('/api/usb/flash', { json: { port: b.usb, target: usbTarget(b) } });
       // While the library builds the image, ask again until it is there.
-      const wait = async () => {
+      for (;;) {
         await new Promise((ok) => setTimeout(ok, 4000));
         const j = (await api('/api/usb')).ports.find((x) => x.port === b.usb)?.job;
         if (j?.state === 'building') { await new Promise((ok) => setTimeout(ok, 15000)); return usbFlash(i); }
-        if (j && ['fetching', 'flashing', 'verifying'].includes(j.state)) return wait();
-      };
-      render(); await wait();
+        if (!j || !['fetching', 'flashing', 'verifying'].includes(j.state)) break;
+      }
     } catch (e) { toast('Прошивка: ' + e.message, true); }
+    render();
   }
   async function usbWifi(i, btn) {
-    const pw = wifiPw;
-    if (!W.wifi.ssid.trim()) return toast('Введите сеть Wi-Fi', true);
+    const port = W.plan[i].usb, ssid = (W.wifi.ssid || '').trim();
+    if (!ssid) return toast('Выберите сеть Wi-Fi', true);
     btn.disabled = true; btn.textContent = 'Плата подключается… (до минуты)';
     try {
       // The board reaches Solarbox at this router's address, plain HTTP, port 8080.
-      const solarbox = `http://${location.hostname}:8080`;
-      const r = await api('/api/usb/wifi', { json: { port: W.plan[i].usb, ssid: W.wifi.ssid.trim(), password: pw, solarbox } });
-      wifiPw = '';
-      W.boards[i] = Object.assign(W.boards[i] || {}, { wifi: r.url || true });
+      await api('/api/usb/wifi', { json: { port, ssid, password: wifiPw, solarbox: `http://${location.hostname}:8080` } });
+      wifiPw = ''; wifiDone[port] = Date.now(); wifiFails[port] = 0;
       toast('Плата в Wi-Fi');
-    } catch (e) { toast(e.message, true); }
+    } catch (e) { wifiFails[port] = (wifiFails[port] || 0) + 1; toast(e.message, true); }
     render();
   }
 
@@ -861,11 +954,6 @@
   // Leaving «Платы»: fix the plan; a changed plan forgets adopted boards.
   function fixPlan() {
     const p = anyStock() ? fromStock().boards : buyFor(need().inv, need().nb);
-    const free = Object.entries(W.usbUse);
-    for (const b of p) {
-      const k = b.own && free.findIndex(([, c]) => c === b.chip);
-      if (k !== false && k >= 0) b.usb = free.splice(k, 1)[0][0];
-    }
     if (JSON.stringify(p) !== JSON.stringify(W.plan)) { W.plan = p; W.boards = {}; for (const k in sims) { clearTimeout(sims[k]); delete sims[k]; } }
   }
 
@@ -908,7 +996,21 @@
     }));
     body.querySelectorAll('[data-sim]').forEach((el) => (el.onclick = () => { const i = el.dataset.sim; clearTimeout(sims[i]); sims[i] = 0; simulate(+i, true); }));
     const wp = $('#wz-wifipw'); if (wp) wp.oninput = () => { wifiPw = wp.value; };
-    body.querySelectorAll('[data-usbuse]').forEach((el) => (el.onclick = () => useUsb(el.dataset.usbuse, el.dataset.chip)));
+    const ws = $('#wz-wifissid');
+    if (ws) ws.onchange = () => { W.wifi.other = ws.value === '\u0000other'; if (!W.wifi.other) W.wifi.ssid = ws.value; render(); };
+    const wo = $('#wz-wifiother'); if (wo) wo.oninput = () => { W.wifi.ssid = wo.value; };
+    body.querySelectorAll('[data-rescan]').forEach((el) => (el.onclick = () => { delete nets[el.dataset.rescan]; render(); }));
+    body.querySelectorAll('[data-usbskip]').forEach((el) => (el.onclick = () => {
+      const port = el.dataset.usbskip;
+      if (W.usbSkip[port]) delete W.usbSkip[port]; else W.usbSkip[port] = true;
+      render();
+    }));
+    body.querySelectorAll('[data-usbretry]').forEach((el) => (el.onclick = () => {
+      const p = usb.ports.find((x) => x.port === el.dataset.usbretry);
+      if (p) { p.tried = 0; p.error = null; }
+      pollUsb();
+    }));
+    body.querySelectorAll('[data-pcflash]').forEach((el) => (el.onclick = (e) => { e.preventDefault(); pcFlash[+el.dataset.pcflash] = true; render(); }));
     body.querySelectorAll('[data-usbflash]').forEach((el) => (el.onclick = () => usbFlash(+el.dataset.usbflash)));
     body.querySelectorAll('[data-usbwifi]').forEach((el) => (el.onclick = () => usbWifi(+el.dataset.usbwifi, el)));
     body.querySelectorAll('[data-later]').forEach((el) => (el.onclick = () => { const i = +el.dataset.later; W.boards[i] = Object.assign(W.boards[i] || {}, { later: !W.boards[i]?.later }); render(); }));

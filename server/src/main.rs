@@ -261,6 +261,7 @@ async fn main() {
         .route("/api/usb/flash", post(usb::flash_api))
         .route("/api/usb/restart", post(usb::restart))
         .route("/api/usb/wifi", post(usb::wifi_api))
+        .route("/api/usb/scan", post(usb::scan_api))
         .route("/api/wizard", get(wizard::get).put(wizard::put))
         .route("/api/wizard/skip", post(wizard::skip))
         .route("/api/wizard/plan", get(wizard::plan_api))

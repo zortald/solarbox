@@ -76,7 +76,15 @@ fn hex(s: &str) -> u16 {
 
 /// Read chip and MAC (the board resets into its bootloader and back).
 pub fn identify(port: &str, vid: &str, pid: &str) -> Result<Value, String> {
-    let mut f = connect(port, hex(vid), hex(pid))?;
+    let mut f = connect(port, hex(vid), hex(pid)).map_err(|e| {
+        // espflash knows only the ESP32 family; an ESP8266 answers its ROM
+        // loader with a chip id it doesn't recognise.
+        if e.to_lowercase().contains("chip") || e.contains("8266") {
+            "чип не из семейства ESP32 (ESP8266?) — не поддерживается, нужна ESP32-C3/S3/ESP32".to_string()
+        } else {
+            e
+        }
+    })?;
     let d = f.device_info().map_err(|e| e.to_string())?;
     Ok(json!({ "chip": d.chip.to_string(), "mac": d.mac_address.unwrap_or_default().to_ascii_uppercase(),
                "flash": d.flash_size.to_string(), "features": d.features }))
@@ -183,6 +191,48 @@ pub fn wifi(port: &str, ssid: &str, pw: &str) -> Result<String, String> {
     Err("плата не ответила по Improv за минуту".into())
 }
 
+/// Networks the board itself sees (Improv RPC 4): (ssid, rssi, secured),
+/// strongest first.
+pub fn scan(port: &str) -> Result<Vec<(String, i32, bool)>, String> {
+    use std::io::{Read, Write};
+    let mut sp = serialport::new(format!("/dev/{port}"), 115_200).timeout(Duration::from_millis(300)).open_native().map_err(|e| format!("порт {port}: {e}"))?;
+    let start = std::time::Instant::now();
+    let (mut buf, mut sent, mut chunk) = (Vec::new(), None::<std::time::Instant>, [0u8; 512]);
+    while start.elapsed() < Duration::from_secs(30) {
+        // The board may still be booting after the flash: ask until it answers.
+        if sent.map_or(true, |t| t.elapsed() > Duration::from_secs(5)) {
+            buf.clear();
+            sp.write_all(&improv_packet(3, &[4, 0])).map_err(|e| e.to_string())?;
+            sent = Some(std::time::Instant::now());
+        }
+        if let Ok(n) = sp.read(&mut chunk) {
+            buf.extend_from_slice(&chunk[..n]);
+        }
+        let results: Vec<Vec<u8>> = improv_parse(&buf).into_iter().filter(|(t, d)| *t == 4 && d.first() == Some(&4)).map(|(_, d)| d).collect();
+        // The list ends with a result that carries no strings.
+        if results.last().is_some_and(|d| d.get(1) == Some(&0)) {
+            let mut out: Vec<(String, i32, bool)> = Vec::new();
+            for d in &results {
+                let mut strs = Vec::new();
+                let mut i = 2;
+                while i < d.len() {
+                    let n = d[i] as usize;
+                    strs.push(String::from_utf8_lossy(d.get(i + 1..i + 1 + n).unwrap_or(&[])).to_string());
+                    i += 1 + n;
+                }
+                if let [ssid, rssi, auth, ..] = strs.as_slice() {
+                    if !ssid.is_empty() && !out.iter().any(|x| &x.0 == ssid) {
+                        out.push((ssid.clone(), rssi.parse().unwrap_or(-100), auth == "YES"));
+                    }
+                }
+            }
+            out.sort_by(|a, b| b.1.cmp(&a.1));
+            return Ok(out);
+        }
+    }
+    Err("плата не ответила списком сетей".into())
+}
+
 // ---- handlers ---------------------------------------------------------------
 
 fn bad(c: StatusCode, e: impl Into<String>) -> Response {
@@ -194,6 +244,7 @@ fn bad(c: StatusCode, e: impl Into<String>) -> Response {
 pub async fn list(State(st): State<AppState>) -> Json<Value> {
     let known = st.usb.known.lock().unwrap().clone();
     let jobs = st.usb.job.lock().unwrap().clone();
+    let disc = st.discovery.boards(&st.config.get(), crate::now());
     let mut ports = ports();
     for p in &mut ports {
         let name = p["port"].as_str().unwrap_or("").to_string();
@@ -203,6 +254,13 @@ pub async fn list(State(st): State<AppState>) -> Json<Value> {
         if let Some(j) = jobs.get(&name) {
             p["job"] = j.clone();
         }
+        // Already running Solarbox and talking to us: its MAC (the built-in
+        // USB's serial number, or what espflash read) is among the boards seen.
+        let mac = p["board"]["mac"].as_str().filter(|m| !m.is_empty()).or(p["serial"].as_str()).unwrap_or("").to_ascii_uppercase();
+        if let Some(d) = disc.iter().find(|d| !mac.is_empty() && d["mac"] == mac.as_str()) {
+            p["solarbox"] = json!({ "fw": d["fw"], "ip": d["ip"], "age": d["age"], "types": d["types"], "adopted_as": d["adopted_as"] });
+        }
+        p["tested"] = json!(p["vid"] == "303a"); // only built-in USB (C3/S3) checked on hardware so far
     }
     let restart = ports.iter().any(|p| p["node"] == false);
     Json(json!({ "ports": ports, "restart_needed": restart }))
@@ -277,6 +335,15 @@ pub async fn flash_api(State(st): State<AppState>, Json(b): Json<FlashBody>) -> 
         st2.usb.job.lock().unwrap().insert(port, v);
     });
     Json(json!({ "ok": true })).into_response()
+}
+
+/// POST /api/usb/scan {port} — Wi-Fi networks around the board.
+pub async fn scan_api(Json(b): Json<PortBody>) -> Response {
+    match tokio::task::spawn_blocking(move || scan(&b.port)).await {
+        Ok(Ok(v)) => Json(json!({ "ok": true, "networks": v.iter().map(|(s, r, sec)| json!({ "ssid": s, "rssi": r, "secured": sec })).collect::<Vec<_>>() })).into_response(),
+        Ok(Err(e)) => bad(StatusCode::BAD_GATEWAY, e),
+        Err(e) => bad(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
+    }
 }
 
 #[derive(serde::Deserialize)]
