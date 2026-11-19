@@ -190,8 +190,11 @@ pub struct Tier {
 }
 
 /// Thin history by age: within each tier's band, average points into `res`-s
-/// buckets. Works per metric along the primary key; idempotent (bands already
-/// on their grid are skipped). Frees the released pages afterwards.
+/// buckets. Works per metric along the primary key and rewrites only the
+/// buckets that still hold off-grid points (new raw samples, or points that
+/// just aged into a coarser tier) — buckets already on the grid are left
+/// alone, so an hourly pass touches about an hour of data, not the whole band.
+/// Returns the number of buckets written. Frees the released pages afterwards.
 pub fn compact(conn: &mut Connection, tiers: &[Tier], now: i64, tail: i64) -> rusqlite::Result<usize> {
     let mids: Vec<i64> = {
         let mut st = conn.prepare("SELECT id FROM metrics")?;
@@ -220,11 +223,13 @@ pub fn compact(conn: &mut Connection, tiers: &[Tier], now: i64, tail: i64) -> ru
             tx.execute("DELETE FROM _roll", [])?;
             tx.prepare_cached(
                 "INSERT INTO _roll SELECT (ts / ?4) * ?4, CAST(ROUND(AVG(v)) AS INTEGER)
-                 FROM points WHERE mid = ?1 AND ts > ?2 AND ts <= ?3 GROUP BY 1",
+                 FROM points WHERE mid = ?1 AND ts > ?2 AND ts <= ?3 GROUP BY 1 HAVING MAX(ts % ?4) > 0",
             )?
             .execute(params![id, lo, hi, t.res])?;
-            tx.prepare_cached("DELETE FROM points WHERE mid = ?1 AND ts > ?2 AND ts <= ?3")?
-                .execute(params![id, lo, hi])?;
+            tx.prepare_cached(
+                "DELETE FROM points WHERE mid = ?1 AND ts > ?2 AND ts <= ?3 AND (ts / ?4) * ?4 IN (SELECT bts FROM _roll)",
+            )?
+            .execute(params![id, lo, hi, t.res])?;
             total += tx
                 .prepare_cached("INSERT OR REPLACE INTO points(mid, ts, v) SELECT ?1, bts, v FROM _roll")?
                 .execute(params![id])?;
@@ -341,6 +346,27 @@ mod tests {
         let after = count(&c);
         assert!(after < before / 5, "{before} → {after}");
         assert_eq!(compact(&mut c, &tiers, now, 172_800).unwrap(), 0, "idempotent");
+    }
+
+    #[test]
+    fn compaction_touches_only_new_buckets() {
+        // A day of 5-s samples in the newest tier, compacted once…
+        let mut c = mem();
+        let now = 2_000_000;
+        for i in 0..17_000 {
+            put(&mut c, now - 86_000 + i * 5, "soc", (i % 7) as f64);
+        }
+        let tiers = vec![Tier { min_age: 0, res: 20 }, Tier { min_age: 86_400, res: 60 }];
+        assert!(compact(&mut c, &tiers, now, 0).unwrap() > 4000);
+        // …then a minute of fresh samples: only their buckets are rewritten.
+        for i in 0..12 {
+            put(&mut c, now + 1 + i * 5, "soc", (i % 3) as f64);
+        }
+        let n = compact(&mut c, &tiers, now + 60, 0).unwrap();
+        assert!(n <= 4, "rewrote {n} buckets for a minute of data");
+        // Every remaining point in the band is on the 20-s grid.
+        let off: i64 = c.query_row("SELECT COUNT(*) FROM points WHERE ts > ?1 AND ts % 20 != 0", params![now + 60 - 86_400], |r| r.get(0)).unwrap();
+        assert_eq!(off, 0);
     }
 
     #[test]
