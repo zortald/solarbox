@@ -246,17 +246,19 @@ async fn main() {
         info("  (или коротко нажмите кнопку Reset — НЕ удерживайте её, долгое нажатие сбрасывает настройки).");
         info("Если роутер питается и от адаптера, и по PoE — отключите оба. На это есть 30 минут.");
         println!();
-        let mut last_min = String::new();
+        // Only the countdown (every 5 min) and what concerns the update; the
+        // session also echoes the router's log, which nobody here needs.
+        let mut last_told: Option<u32> = None;
         let r = sshc
             .run_until_closed("/system/device-mode/update container=yes activation-timeout=30m", |l| {
                 if let Some(t) = l.split("turn off power in ").nth(1) {
                     let t = t.split_whitespace().next().unwrap_or("");
-                    let min = t.split('m').next().unwrap_or("").to_string();
-                    if t.contains('m') && min != last_min {
-                        info(&format!("ждёт подтверждения питанием, осталось {t}"));
-                        last_min = min;
+                    let min: u32 = t.split('m').next().and_then(|m| m.parse().ok()).unwrap_or(0);
+                    if last_told.map_or(true, |m| m >= min + 5) {
+                        info(&format!("ждёт подтверждения питанием, осталось ≈{min} мин"));
+                        last_told = Some(min);
                     }
-                } else if !l.starts_with('[') {
+                } else if l.contains("too many") || l.contains("not allowed") || l.contains("denied") {
                     info(&format!("роутер: {l}"));
                 }
             })
@@ -320,7 +322,7 @@ async fn main() {
     step("Контейнер");
     ok(ros.ensure("/container/mounts", "?list=sb-data", json!({ "list": "sb-data", "src": "/sb-data", "dst": "/data" })), "папка данных");
     let mut c = json!({ "file": FILE, "interface": VETH, "root-dir": "sb-root", "mountlists": "sb-data",
-                        "logging": "yes", "start-on-boot": "yes", "name": NAME, "restart-policy": "unless-stopped" });
+                        "logging": "yes", "start-on-boot": "yes", "name": NAME, "restart-policy": "on-failure" });
     if ros.add("/container", c.clone()).is_err() {
         // Older 7.x without restart policies.
         c.as_object_mut().unwrap().remove("restart-policy");

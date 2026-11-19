@@ -22,7 +22,14 @@ pub struct Ssh(client::Handle<Accept>);
 
 impl Ssh {
     pub async fn connect(host: &str, port: u16, user: &str, pw: &str) -> Result<Ssh, String> {
-        let cfg = Arc::new(client::Config { inactivity_timeout: None, ..Default::default() });
+        // A router losing power never closes the session: keepalives notice
+        // the dead link within ≈15 s.
+        let cfg = Arc::new(client::Config {
+            inactivity_timeout: None,
+            keepalive_interval: Some(std::time::Duration::from_secs(5)),
+            keepalive_max: 3,
+            ..Default::default()
+        });
         let mut h = client::connect(cfg, (host, port), Accept).await.map_err(|e| format!("SSH к роутеру ({host}:{port}): {e}"))?;
         let ok = h.authenticate_password(user, pw).await.map_err(|e| format!("SSH: {e}"))?;
         if !ok.success() {
