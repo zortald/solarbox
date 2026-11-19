@@ -1,8 +1,9 @@
-# On-demand build: one artifact for one release, started by the build Worker
-# (or by hand). Already in the release → nothing to do. Otherwise build, sign
-# (ed25519, SB_SIGNING_KEY; public key in deploy/signing-key.pub) and upload
-# to the release, creating the release from the tag if needed.
-# The run name is what the Worker matches to see a build already running.
+# On-demand build: one artifact for one release, started by the build relay
+# (or by hand). Already in the release → nothing to do. Otherwise build on a
+# runner of the right OS, then sign (ed25519, SB_SIGNING_KEY; public key in
+# deploy/signing-key.pub) and upload on Linux, creating the release from the
+# tag if needed. The run name is what the relay matches to see a build
+# already running.
 name: build
 run-name: build ${{ inputs.kind }} ${{ inputs.arch }} ${{ inputs.version }}
 
@@ -11,10 +12,10 @@ on:
     inputs:
       kind:
         type: choice
-        options: [server]
+        options: [server, installer]
       arch:
-        type: choice
-        options: [armv5, armv7, arm64, x86_64, mips, mipsel]
+        description: "server: armv5 armv7 arm64 x86_64 mips mipsel · installer: linux-x86_64 linux-arm64 macos-arm64 macos-x86_64 windows-x86_64 windows-arm64 android-arm64"
+        required: true
       version:
         description: release tag, e.g. v0.1.0
         required: true
@@ -25,34 +26,61 @@ concurrency:
 permissions:
   contents: write
 
+env:
+  GH_TOKEN: ${{ github.token }}
+  TAG: ${{ inputs.version }}
+  ASSET: solarbox-${{ inputs.kind }}-${{ inputs.arch }}
+
 jobs:
-  build:
+  check:
     runs-on: ubuntu-latest
-    env:
-      GH_TOKEN: ${{ github.token }}
-      TAG: ${{ inputs.version }}
-      ASSET: solarbox-${{ inputs.kind }}-${{ inputs.arch }}
+    outputs:
+      done: ${{ steps.have.outputs.done }}
     steps:
+      - name: known combination?
+        run: |
+          case "${{ inputs.kind }} ${{ inputs.arch }}" in
+            "server armv5"|"server armv7"|"server arm64"|"server x86_64"|"server mips"|"server mipsel") ;;
+            "installer linux-x86_64"|"installer linux-arm64"|"installer macos-arm64"|"installer macos-x86_64") ;;
+            "installer windows-x86_64"|"installer windows-arm64"|"installer android-arm64") ;;
+            *) echo "unknown: ${{ inputs.kind }} ${{ inputs.arch }}"; exit 1 ;;
+          esac
       - name: already built?
         id: have
         run: |
-          if gh release view "$TAG" -R "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name' 2>/dev/null | grep -qx "$ASSET.sig"; then
+          if gh release view "$TAG" -R "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name' 2>/dev/null | grep -Eq "^$ASSET(\.exe)?\.sig$"; then
             echo "done=true" >> "$GITHUB_OUTPUT"; echo "$ASSET is in $TAG already"
           fi
+
+  build:
+    needs: check
+    if: ${{ !needs.check.outputs.done }}
+    runs-on: ${{ startsWith(inputs.arch, 'macos') && 'macos-latest' || startsWith(inputs.arch, 'windows') && 'windows-latest' || 'ubuntu-latest' }}
+    defaults:
+      run: { shell: bash }
+    steps:
       - uses: actions/checkout@v4
-        if: ${{ !steps.have.outputs.done }}
         with: { ref: "${{ inputs.version }}" }
       - uses: dtolnay/rust-toolchain@nightly
-        if: ${{ !steps.have.outputs.done && startsWith(inputs.arch, 'mips') }}
+        if: ${{ inputs.kind == 'server' && startsWith(inputs.arch, 'mips') }}
         with: { components: rust-src }
       - name: zig for mips
-        if: ${{ !steps.have.outputs.done && startsWith(inputs.arch, 'mips') }}
+        if: ${{ inputs.kind == 'server' && startsWith(inputs.arch, 'mips') }}
         run: pip install -q ziglang cargo-zigbuild
+      - uses: dtolnay/rust-toolchain@stable
+        if: ${{ inputs.kind == 'installer' && !startsWith(inputs.arch, 'linux') }}
       - name: build
-        if: ${{ !steps.have.outputs.done }}
-        run: ./deploy/ci-build-server.sh "${{ inputs.arch }}" dist
+        run: ./deploy/ci-build-${{ inputs.kind }}.sh "${{ inputs.arch }}" dist
+      - uses: actions/upload-artifact@v4
+        with: { name: dist, path: dist/ }
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with: { name: dist, path: dist }
       - name: sign
-        if: ${{ !steps.have.outputs.done }}
         env:
           KEY: ${{ secrets.SB_SIGNING_KEY }}
         run: |
@@ -64,9 +92,8 @@ jobs:
           rm "$RUNNER_TEMP/key.pem"
           ls -l dist
       - name: upload
-        if: ${{ !steps.have.outputs.done }}
         run: |
-          gh release view "$TAG" >/dev/null 2>&1 || gh release create "$TAG" --verify-tag --title "$TAG" --notes "" || gh release view "$TAG" >/dev/null
+          gh release view "$TAG" -R "$GITHUB_REPOSITORY" >/dev/null 2>&1 || gh release create "$TAG" -R "$GITHUB_REPOSITORY" --verify-tag --title "$TAG" --notes "" || gh release view "$TAG" -R "$GITHUB_REPOSITORY" >/dev/null
           # The signature last: its presence means the artifact is complete.
-          gh release upload "$TAG" $(ls dist/* | grep -v '\.sig$') --clobber
-          gh release upload "$TAG" dist/*.sig --clobber
+          gh release upload "$TAG" -R "$GITHUB_REPOSITORY" $(ls dist/* | grep -v '\.sig$') --clobber
+          gh release upload "$TAG" -R "$GITHUB_REPOSITORY" dist/*.sig --clobber

@@ -4,13 +4,17 @@
 // token and reports progress. Only combinations from the lists below are
 // accepted — never arbitrary input reaches GitHub.
 //
-//   GET /v1/server/<arch>[?version=vX.Y.Z]   (no version = newest tag)
+//   GET /v1/server/<arch>[?version=vX.Y.Z]      (no version = newest tag)
+//   GET /v1/installer/<os-arch>[?version=vX.Y.Z]
 //   → { status: "ready", version, files: { bin: {url, sig}, routeros?: {url, sig} } }
 //   → { status: "building", version, run }      poll again in ~15 s
 //   → { status: "failed", version, run }        the last build for it failed
 //   → 400 { error } / 404 { error } / 502 { error }
 
-export const ARCHS = ['armv5', 'armv7', 'arm64', 'x86_64', 'mips', 'mipsel'];
+export const KINDS = {
+  server: ['armv5', 'armv7', 'arm64', 'x86_64', 'mips', 'mipsel'],
+  installer: ['linux-x86_64', 'linux-arm64', 'macos-arm64', 'macos-x86_64', 'windows-x86_64', 'windows-arm64', 'android-arm64'],
+};
 const ROUTEROS = new Set(['armv5', 'armv7', 'arm64', 'x86_64']);
 const VERSION = /^v\d+\.\d+\.\d+$/;
 const WORKFLOW = 'build.yml';
@@ -40,10 +44,10 @@ export function readyFiles(assets, kind, arch) {
   const by = Object.fromEntries(assets.map((a) => [a.name, a.browser_download_url]));
   const pair = (name) => (by[name] && by[name + '.sig'] ? { url: by[name], sig: by[name + '.sig'] } : null);
   const base = `solarbox-${kind}-${arch}`;
-  const bin = pair(base);
+  const bin = pair(base + (arch.startsWith('windows') ? '.exe' : ''));
   if (!bin) return null;
   const files = { bin };
-  if (ROUTEROS.has(arch)) {
+  if (kind === 'server' && ROUTEROS.has(arch)) {
     const ros = pair(base + '.routeros.tar');
     if (!ros) return null;
     files.routeros = ros;
@@ -76,8 +80,9 @@ function github(env) {
   };
 }
 
-export async function server(gh, arch, version, now = Date.now()) {
-  if (!ARCHS.includes(arch)) return json(400, { error: `unknown arch; one of ${ARCHS.join(', ')}` });
+export async function artifact(gh, kind, arch, version, now = Date.now()) {
+  if (!KINDS[kind]) return json(404, { error: 'unknown path' });
+  if (!KINDS[kind].includes(arch)) return json(400, { error: `unknown ${kind} target; one of ${KINDS[kind].join(', ')}` });
   if (version && !VERSION.test(version)) return json(400, { error: 'version must look like v1.2.3' });
   const asked = version;
   if (!version) {
@@ -87,12 +92,12 @@ export async function server(gh, arch, version, now = Date.now()) {
     return json(404, { error: `no such version ${version}` });
   }
 
-  const files = readyFiles(await gh.assets(version), 'server', arch);
+  const files = readyFiles(await gh.assets(version), kind, arch);
   // A built version never changes: cache it for an hour; "newest" for 5 min
   // so a new release shows up soon.
   if (files) return json(200, { status: 'ready', version, files }, asked ? 3600 : 300);
 
-  const t = title('server', arch, version);
+  const t = title(kind, arch, version);
   const last = (await gh.runs()).find((r) => r.display_title === t);
   // Polls within 10 s share one answer. A duplicate dispatch (the new run is not
   // listed yet) is harmless: build.yml queues it and it finds the asset built.
@@ -100,7 +105,7 @@ export async function server(gh, arch, version, now = Date.now()) {
   if (last && last.conclusion === 'failure' && now - Date.parse(last.updated_at) < FAILED_HOLD_MS)
     return json(200, { status: 'failed', version, run: last.html_url });
 
-  await gh.dispatch({ kind: 'server', arch, version });
+  await gh.dispatch({ kind, arch, version });
   return json(200, { status: 'building', version, run: null }, 10);
 }
 
@@ -108,7 +113,7 @@ export default {
   async fetch(req, env, ctx) {
     const url = new URL(req.url);
     if (req.method !== 'GET') return json(405, { error: 'GET only' });
-    const m = url.pathname.match(/^\/v1\/server\/([a-z0-9_]+)$/);
+    const m = url.pathname.match(/^\/v1\/([a-z]+)\/([a-z0-9_-]+)$/);
     if (!m) return json(404, { error: 'unknown path' });
 
     // Same answer for everyone: serve repeated polls from the edge cache.
@@ -117,7 +122,7 @@ export default {
     if (hit) return hit;
     let res;
     try {
-      res = await server(github(env), m[1], url.searchParams.get('version') || '');
+      res = await artifact(github(env), m[1], m[2], url.searchParams.get('version') || '');
     } catch (e) {
       return json(502, { error: String(e.message || e) });
     }

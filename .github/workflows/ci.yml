@@ -14,6 +14,15 @@ jobs:
       - run: cargo test --release
         working-directory: server
 
+  installer:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: Swatinem/rust-cache@v2
+        with: { workspaces: installer }
+      - run: cargo test --release
+        working-directory: installer
+
   # Static musl server binary for every router/box architecture, the same
   # script on-demand builds use. armv5 = EN7562CT routers (catches crypto
   # backends that don't build there); mips is an experiment (see the script).

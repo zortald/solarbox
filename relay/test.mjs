@@ -1,7 +1,8 @@
 // node --test relay/test.mjs — the relay logic against a fake GitHub.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { server, newest, readyFiles } from './src/index.js';
+import { artifact, newest, readyFiles } from './src/index.js';
+const server = (gh, arch, version, now) => artifact(gh, 'server', arch, version, now);
 
 const asset = (name) => ({ name, browser_download_url: `https://dl/${name}` });
 const built = (arch) => [`solarbox-server-${arch}`, `solarbox-server-${arch}.sig`, `solarbox-server-${arch}.routeros.tar`, `solarbox-server-${arch}.routeros.tar.sig`].map(asset);
@@ -72,4 +73,16 @@ test('bad input never reaches GitHub', async () => {
   assert.equal((await server(gh, 'armv5', 'main')).status, 400);
   assert.equal((await server(gh, 'armv5', 'v9.9.9')).status, 404);
   assert.equal(gh.dispatched.length, 0);
+});
+
+test('installer: per OS, .exe on Windows, no RouterOS image', async () => {
+  const gh = fake({ assets: ['solarbox-installer-windows-x86_64.exe', 'solarbox-installer-windows-x86_64.exe.sig'].map(asset) });
+  const r = await body(await artifact(gh, 'installer', 'windows-x86_64', 'v0.1.0'));
+  assert.equal(r.status, 'ready');
+  assert.equal(r.files.routeros, undefined);
+  const g2 = fake();
+  assert.equal((await body(await artifact(g2, 'installer', 'macos-arm64', ''))).status, 'building');
+  assert.deepEqual(g2.dispatched, [{ kind: 'installer', arch: 'macos-arm64', version: 'v0.1.0' }]);
+  assert.equal((await artifact(g2, 'installer', 'armv5', '')).status, 400);
+  assert.equal((await artifact(g2, 'firmware', 'x', '')).status, 404);
 });
