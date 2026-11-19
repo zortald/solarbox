@@ -10,7 +10,7 @@
 # Слот без MAC ничего не делает и ничего не шлёт.
 
 substitutions:
-  fw_version: "1.2.0"
+  fw_version: "1.3.0"
 
 esphome:
   name: solarbox-bms

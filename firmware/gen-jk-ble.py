@@ -3,9 +3,11 @@
 slots on one ESP32-family chip (each: own MAC, protocol and device name, all set
 at runtime and kept in flash).
 
-    python3 firmware/gen-jk-ble.py [slots] [chip] [out.yaml]
+    python3 firmware/gen-jk-ble.py [slots] [chip] [out.yaml] [pi30]
         slots 1–3 (default 2), chip c3 | s3 | esp32 (default c3);
-        out defaults to firmware/jk-ble.yaml (the checked-in c3, 2 slots).
+        out defaults to firmware/jk-ble.yaml (the checked-in c3, 2 slots);
+        pi30 adds the PI30 inverter (Voltronic/PowMr/MPP/EASun, RS232 through a
+        MAX3232 on the board's fixed UART pins).
 
 Slot 1 keeps the plain entity names (and device name "bms"), so a one-battery
 site looks exactly like before; slot N > 1 adds " #N" to every entity name and
@@ -16,6 +18,9 @@ import sys
 SLOTS = int(sys.argv[1]) if len(sys.argv) > 1 else 2
 CHIP = sys.argv[2] if len(sys.argv) > 2 else "c3"
 OUT = sys.argv[3] if len(sys.argv) > 3 else __file__.replace("gen-jk-ble.py", "jk-ble.yaml")
+PI30 = len(sys.argv) > 4 and sys.argv[4] == "pi30"
+# UART to the inverter («распиновка Solarbox»): chip → (TX, RX), as the wizard draws them.
+UART = {"c3": ("GPIO21", "GPIO20"), "s3": ("GPIO17", "GPIO18"), "esp32": ("GPIO17", "GPIO16")}
 # chip → (PlatformIO board, name in the header, extra esp32: lines, logger: lines)
 # S3: 4 MB flash covers every module; log and Improv on the chip's own USB
 # (boards with only that port, e.g. SuperMini/Zero, show nothing on UART0).
@@ -26,7 +31,7 @@ CHIPS = {
 }
 BOARD, CHIP_NAME, ESP32_EXTRA, LOGGER = CHIPS[CHIP]
 CELLS = 16
-FW = "1.2.0"
+FW = "1.3.0"
 # BLE scan results ride along with slot 1's packet (sent even with no BMS set,
 # so the wizard can list what's around).
 FOUND = """                  {
@@ -284,13 +289,124 @@ def slot_block(n):
     }
 
 
+def inverter_block():
+    """PI30 inverter: same entity names as the site-built inverter board
+    ("inverter …"), so Solarbox's inverter page and automations work as is."""
+    tx, rx = UART[CHIP]
+    sensors = [("grid_voltage", "s_gv"), ("grid_frequency", "s_gf"), ("ac_output_voltage", "s_ov"),
+               ("ac_output_frequency", None), ("ac_output_apparent_power", None), ("ac_output_active_power", "s_load"),
+               ("output_load_percent", "s_lp"), ("bus_voltage", None), ("battery_voltage", "s_bv"),
+               ("battery_charging_current", "s_bc"), ("battery_capacity_percent", None),
+               ("inverter_heat_sink_temperature", "s_temp"), ("pv_input_current_for_battery", None),
+               ("pv_input_voltage", "s_pvv"), ("battery_voltage_scc", None), ("battery_discharge_current", "s_bd"),
+               ("pv_charging_power", "s_pv")]
+    sens = "".join(f"    {k}:\n" + (f"      id: {i}\n" if i else "") + f"      name: \"inverter {k}\"\n" for k, i in sensors)
+    switches = "".join(f"    {k}:\n      name: \"inverter {k}\"\n" for k in
+                       ("output_source_priority_utility", "output_source_priority_solar", "output_source_priority_battery",
+                        "input_voltage_range", "pv_ok_condition_for_parallel", "pv_power_balance"))
+    return {
+        "top": f"""# Инвертор PI30: RS232 через MAX3232 на выводах {tx} (TX) / {rx} (RX), 2400 бод.
+uart:
+  id: uart_inv
+  baud_rate: 2400
+  tx_pin: {tx}
+  rx_pin: {rx}
+
+pipsolar:
+  uart_id: uart_inv
+  id: inverter0
+
+switch:
+  - platform: pipsolar
+    pipsolar_id: inverter0
+{switches}
+""",
+        "sensor": f"""  - platform: pipsolar
+    pipsolar_id: inverter0
+{sens}""",
+        "text_sensor": """  - platform: pipsolar
+    pipsolar_id: inverter0
+    device_mode:
+      name: "inverter device_mode"
+    # сырые ответы инвертора: текущие настройки, флаги, модель, предупреждения
+    last_qpiri:
+      name: "inverter raw qpiri"
+    last_qflag:
+      name: "inverter raw qflag"
+    last_qmn:
+      name: "inverter raw qmn"
+    last_qpiws:
+      name: "inverter raw qpiws"
+""",
+        "text": """  # Команда настройки инвертора (PI30): только разрешённые — без PF (заводской
+  # сброс), RTEY/RTDL (стирание данных), DAT, V<nnn>, POPM, ATE.
+  - platform: template
+    name: "inverter command"
+    mode: text
+    max_length: 16
+    optimistic: true
+    set_action:
+      - lambda: |-
+          static const char *const allowed[] = {"POP", "PCP", "PGR", "PBT", "PBCV", "PBDV", "PSDV", "PCVV", "PBFT",
+                                                "MUCHGC", "MNCHGC", "MCHGC", "PE", "PD", "F50", "F60"};
+          std::string cmd = x;
+          for (auto &c : cmd) c = toupper(c);
+          bool ok = !cmd.empty() && cmd.size() <= 12;
+          for (auto c : cmd) if (!isalnum(c) && c != '.') ok = false;
+          bool known = false;
+          for (auto *a : allowed) if (cmd.rfind(a, 0) == 0) known = true;
+          if (!ok || !known) { ESP_LOGW("command", "Отклонено: %s", cmd.c_str()); return; }
+          ESP_LOGW("command", "В инвертор: %s", cmd.c_str());
+          id(inverter0)->queue_command(cmd);
+""",
+        "push": f"""      - if:
+          condition:
+            lambda: return wifi::global_wifi_component->is_connected();
+          then:
+            - http_request.post:
+                url: !lambda return id(sb_target);
+                request_headers:
+                  Content-Type: application/json
+                json: |-
+                  root["device"] = "inverter";
+                  JsonObject b = root["board"].to<JsonObject>();
+                  b["type"] = "pi30";
+                  b["fw"] = "${{fw_version}}";
+                  b["chip"] = "{CHIP_NAME}";
+                  b["mac"] = get_mac_address_pretty();
+                  b["slot"] = 0;
+                  b["slots"] = {SLOTS};
+                  {{
+                    esp_netif_ip_info_t ii;
+                    esp_netif_get_ip_info(esp_netif_get_handle_from_ifkey("WIFI_STA_DEF"), &ii);
+                    char ipb[16];
+                    esp_ip4addr_ntoa(&ii.ip, ipb, sizeof ipb);
+                    b["ip"] = ipb;
+                  }}
+                  JsonObject m = root["metrics"].to<JsonObject>();
+                  auto put = [&](const char *k, float v) {{ if (!std::isnan(v)) m[k] = v; }};
+                  put("ac_out_w", id(s_load).state);
+                  put("pv_w", id(s_pv).state);
+                  put("pv_v", id(s_pvv).state);
+                  put("grid_v", id(s_gv).state);
+                  put("grid_hz", id(s_gf).state);
+                  put("out_v", id(s_ov).state);
+                  put("load_pct", id(s_lp).state);
+                  put("batt_v", id(s_bv).state);
+                  put("batt_chg_a", id(s_bc).state);
+                  put("batt_dis_a", id(s_bd).state);
+                  put("temp", id(s_temp).state);
+""",
+    }
+
+
 def main():
-    slots = [slot_block(n) for n in range(1, SLOTS + 1)]
-    sec = lambda name: "".join(s[name] for s in slots)
+    slots = [slot_block(n) for n in range(1, SLOTS + 1)] + ([inverter_block()] if PI30 else [])
+    sec = lambda name: "".join(s.get(name, "") for s in slots)
     applies = "".join(f"        - script.execute: apply_bms{n}\n" for n in range(1, SLOTS + 1))
-    y = f"""# GENERATED by gen-jk-ble.py ({SLOTS} slots, {CHIP}) — edit the generator, not this file.
+    y = f"""# GENERATED by gen-jk-ble.py ({SLOTS} slots, {CHIP}{", pi30" if PI30 else ""}) — edit the generator, not this file.
 #
-# Solarbox · плата JK BMS по Bluetooth ({CHIP_NAME}), до {SLOTS} BMS на одной плате.
+# Solarbox · плата {"инвертора PI30 и " if PI30 else ""}JK BMS по Bluetooth ({CHIP_NAME}), до {SLOTS} BMS на одной плате.
 # Универсальная прошивка: ничего про объект внутри. Wi-Fi задаётся после прошивки
 # (web.esphome.io → Improv, или точка доступа платы), адрес Solarbox, MAC и
 # протокол каждой BMS — в мастере Solarbox или на веб-странице платы. Всё хранится
@@ -422,7 +538,7 @@ number:
 {sec("number")}
 # Отправка в Solarbox: по запросу на каждую заданную BMS (слот 1 — всегда,
 # с данными о плате и найденных рядом BMS).
-http_request:
+{sec("top")}http_request:
   verify_ssl: false
   timeout: 3s
 
@@ -437,7 +553,7 @@ interval:
       - script.execute: ingest_url
 {sec("push")}"""
     open(OUT, "w").write(y)
-    print(f"{OUT}: {CHIP_NAME}, {SLOTS} slots, {CELLS} cells each")
+    print(f"{OUT}: {CHIP_NAME}, {SLOTS} slots, {CELLS} cells each{', PI30 inverter' if PI30 else ''}")
 
 
 main()

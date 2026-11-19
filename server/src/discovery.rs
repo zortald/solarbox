@@ -59,9 +59,13 @@ impl Discovery {
                     .map(|s| json!({ "slot": s.board["slot"].as_u64().unwrap_or(1), "device": s.device,
                                      "bms_mac": s.board["bms_mac"], "proto": s.board["proto"], "connected": s.board["connected"], "age": now - s.ts }))
                     .collect();
+                // A board running several drivers (pi30 + jk-ble) sends packets of each type.
+                let mut types: Vec<String> = seen.iter().filter_map(|s| s.board["type"].as_str().map(String::from)).collect();
+                types.sort();
+                types.dedup();
                 // BLE scan results ride on one slot's packet; take whichever has them.
                 let found = seen.iter().find_map(|s| s.board.get("found").filter(|f| f.is_array())).cloned().unwrap_or(json!([]));
-                let v = json!({ "mac": key, "type": b["type"], "fw": b["fw"], "ip": ip, "chip": b["chip"], "slots_total": b["slots"],
+                let v = json!({ "mac": key, "type": b["type"], "types": types, "fw": b["fw"], "ip": ip, "chip": b["chip"], "slots_total": b["slots"],
                                 "age": now - newest.ts, "slots": slots, "found": found, "adopted_as": adopted.map(|c| c.name.clone()) });
                 (newest.ts, v)
             })

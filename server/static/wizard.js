@@ -620,7 +620,7 @@
         return { slot: k + 1, bms_mac: mac, proto: s?.proto || 'JK02_32S', device: nbms === 1 ? 'bms' : 'bms' + nbms };
       });
       // Named by what it runs now (a board meant for both may have the BMS part only yet).
-      const inv = b.inv && f.type === 'pi30';
+      const inv = b.inv && (f.types || [f.type]).includes('pi30');
       adopt.push({ mac: f.mac, ip: f.ip, chip: f.chip || CHIPS[b.chip].t, title: inv ? 'Инвертор' : 'АКБ · JK BMS',
         name: inv ? 'inverter' : firstBms ? 'bms' : 'bms-board' + (i + 1), slots });
     });
@@ -660,10 +660,10 @@
       const want = b.inv ? 'pi30' : 'jk-ble';
       const um = b.usb && (() => { const p = usb.ports.find((x) => x.port === b.usb); return (p?.board?.mac || p?.serial || '').toUpperCase(); })();
       const d = um ? disc.find((x) => x.mac === um && x.age < 120)
-        : disc.find((x) => x.type === want && !claimed.has(x.mac) && x.age < 120);
+        : disc.find((x) => (x.types || [x.type]).includes(want) && !claimed.has(x.mac) && x.age < 120);
       if (!d) return;
       claimed.add(d.mac);
-      W.boards[i] = { found: { mac: d.mac, ip: d.ip, fw: d.fw || '?', type: d.type, chip: d.chip || '' }, adopted: !!d.adopted_as, already: d.adopted_as };
+      W.boards[i] = { found: { mac: d.mac, ip: d.ip, fw: d.fw || '?', type: d.type, types: d.types, chip: d.chip || '' }, adopted: !!d.adopted_as, already: d.adopted_as };
       toast(`Найдена новая плата: ${d.ip}`);
       changed = true;
     });
@@ -682,8 +682,9 @@
   setInterval(poll, 3000);
 
   // Firmware for a planned board: built on demand by the relay, reused after.
-  // Library images (relay /v1/firmware/…): JK boards so far, PI30 to come.
-  const FIRMWARE = ['c3-jk1', 'c3-jk2', 's3-jk1', 's3-jk2', 's3-jk3', 'esp32-jk1', 'esp32-jk2', 'esp32-jk3'];
+  // Library images (relay /v1/firmware/…): JK BMS boards, with or without the PI30 inverter.
+  const FIRMWARE = ['c3-jk1', 'c3-jk2', 's3-jk1', 's3-jk2', 's3-jk3', 'esp32-jk1', 'esp32-jk2', 'esp32-jk3',
+    'c3-pi30-jk1', 's3-pi30-jk1', 's3-pi30-jk2', 's3-pi30-jk3', 'esp32-pi30-jk1', 'esp32-pi30-jk2', 'esp32-pi30-jk3'];
   const fwTarget = (b) => `${b.chip}${b.inv ? '-pi30' : ''}${b.nb ? '-jk' + b.nb : ''}`;
   // A board in the router's USB: the full image if the library has it, else
   // its BMS part now (the inverter comes later over the air).

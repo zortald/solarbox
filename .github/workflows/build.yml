@@ -14,7 +14,7 @@ on:
         type: choice
         options: [server, installer, firmware]
       arch:
-        description: "server: armv5 armv7 arm64 x86_64 mips mipsel · installer: linux-x86_64 linux-arm64 macos-arm64 macos-x86_64 windows-x86_64 windows-arm64 android-arm64 · firmware: <chip>-jk<n> (c3-jk1 c3-jk2 s3-jk1..3 esp32-jk1..3)"
+        description: "server: armv5 armv7 arm64 x86_64 mips mipsel · installer: linux-x86_64 linux-arm64 macos-arm64 macos-x86_64 windows-x86_64 windows-arm64 android-arm64 · firmware: <chip>[-pi30]-jk<n> (c3-jk1 c3-jk2 s3-jk1..3 esp32-jk1..3; with pi30: c3 1, s3 1..3, esp32 1..3)"
         required: true
       version:
         description: release tag, e.g. v0.1.0
@@ -44,6 +44,7 @@ jobs:
             "installer linux-x86_64"|"installer linux-arm64"|"installer macos-arm64"|"installer macos-x86_64") ;;
             "installer windows-x86_64"|"installer windows-arm64"|"installer android-arm64") ;;
             "firmware c3-jk1"|"firmware c3-jk2"|"firmware s3-jk1"|"firmware s3-jk2"|"firmware s3-jk3"|"firmware esp32-jk1"|"firmware esp32-jk2"|"firmware esp32-jk3") ;;
+            "firmware c3-pi30-jk1"|"firmware s3-pi30-jk1"|"firmware s3-pi30-jk2"|"firmware s3-pi30-jk3"|"firmware esp32-pi30-jk1"|"firmware esp32-pi30-jk2"|"firmware esp32-pi30-jk3") ;;
             *) echo "unknown: ${{ inputs.kind }} ${{ inputs.arch }}"; exit 1 ;;
           esac
       - name: already built?
@@ -78,8 +79,8 @@ jobs:
       - name: generate firmware
         if: ${{ inputs.kind == 'firmware' }}
         run: |
-          chip=${ARCH%-jk*}; n=${ARCH##*-jk}
-          mkdir -p fw && python3 firmware/gen-jk-ble.py "$n" "$chip" "fw/$ASSET.yaml"
+          chip=${ARCH%%-*}; n=${ARCH##*-jk}; inv=; case $ARCH in *-pi30-*) inv=pi30 ;; esac
+          mkdir -p fw && python3 firmware/gen-jk-ble.py "$n" "$chip" "fw/$ASSET.yaml" $inv
         env: { ARCH: "${{ inputs.arch }}" }
       - uses: esphome/build-action@v7
         if: ${{ inputs.kind == 'firmware' }}

@@ -16,9 +16,10 @@
 export const KINDS = {
   server: ['armv5', 'armv7', 'arm64', 'x86_64', 'mips', 'mipsel'],
   installer: ['linux-x86_64', 'linux-arm64', 'macos-arm64', 'macos-x86_64', 'windows-x86_64', 'windows-arm64', 'android-arm64'],
-  // Board images: <chip>-jk<BMS slots>; `bin` is for the first flash over
+  // Board images: <chip>[-pi30]-jk<BMS slots>; `bin` is for the first flash over
   // USB, `ota` for updates over the air.
-  firmware: ['c3-jk1', 'c3-jk2', 's3-jk1', 's3-jk2', 's3-jk3', 'esp32-jk1', 'esp32-jk2', 'esp32-jk3'],
+  firmware: ['c3-jk1', 'c3-jk2', 's3-jk1', 's3-jk2', 's3-jk3', 'esp32-jk1', 'esp32-jk2', 'esp32-jk3',
+    'c3-pi30-jk1', 's3-pi30-jk1', 's3-pi30-jk2', 's3-pi30-jk3', 'esp32-pi30-jk1', 'esp32-pi30-jk2', 'esp32-pi30-jk3'],
 };
 const ROUTEROS = new Set(['armv5', 'armv7', 'arm64', 'x86_64']);
 const VERSION = /^v\d+\.\d+\.\d+$/;

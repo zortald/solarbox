@@ -21,15 +21,15 @@ pub fn verify(data: &[u8], sig: &[u8]) -> bool {
     ring::signature::UnparsedPublicKey::new(&ring::signature::ED25519, key).verify(data, sig).is_ok()
 }
 
-/// Library name of a JK BLE board's image: `<chip>-jk<slots>`.
-pub fn target(chip: &str, slots: u64) -> Option<String> {
+/// Library name of a board's image: `<chip>[-pi30]-jk<slots>`.
+pub fn target(chip: &str, slots: u64, pi30: bool) -> Option<String> {
     let c = match chip {
         "ESP32-C3" => "c3",
         "ESP32-S3" => "s3",
         "ESP32" => "esp32",
         _ => return None,
     };
-    Some(format!("{c}-jk{slots}"))
+    Some(format!("{c}{}-jk{slots}", if pi30 { "-pi30" } else { "" }))
 }
 
 fn get(url: &str) -> Result<ureq::Response, String> {
@@ -51,8 +51,21 @@ enum Got {
     Image(String, Vec<u8>),
 }
 
+/// An image put into `<data>/fw/` by hand (a local build): used before the
+/// library, signature checked all the same.
+fn local(target: &str, which: &str) -> Option<Result<Got, String>> {
+    let dir = std::path::PathBuf::from(std::env::var("SOLARBOX_DATA_DIR").unwrap_or_else(|_| "/data".into())).join("fw");
+    let f = dir.join(format!("solarbox-firmware-{target}{}", if which == "ota" { ".ota.bin" } else { ".bin" }));
+    let image = std::fs::read(&f).ok()?;
+    let sig = std::fs::read(f.with_extension(format!("{}.sig", f.extension()?.to_str()?))).ok()?;
+    Some(if verify(&image, &sig) { Ok(Got::Image("своя сборка".into(), image)) } else { Err(format!("{}: подпись не сходится — не прошиваю", f.display())) })
+}
+
 /// `which`: "ota" (over the air) or "bin" (factory image, first flash).
 fn fetch_file(target: &str, which: &str) -> Result<Got, String> {
+    if let Some(r) = local(target, which) {
+        return r;
+    }
     let v: Value = get(&format!("{RELAY}/v1/firmware/{target}"))?.into_json().map_err(|e| e.to_string())?;
     match v["status"].as_str() {
         Some("building") => Ok(Got::Building),
@@ -101,10 +114,11 @@ pub async fn update(State(st): State<AppState>, Path(name): Path<String>, body: 
     let seen = st.discovery.boards(&cfg, crate::now()).into_iter().find(|d| d["mac"] == mac.as_str() || d["ip"] == b.host.as_str());
     let target = body.and_then(|Json(x)| x.target).or_else(|| {
         let d = seen.as_ref()?;
-        if d["type"] != "jk-ble" {
+        let types: Vec<&str> = d["types"].as_array()?.iter().filter_map(|t| t.as_str()).collect();
+        if !types.contains(&"jk-ble") && !types.contains(&"pi30") {
             return None;
         }
-        target(d["chip"].as_str()?, d["slots_total"].as_u64()?)
+        target(d["chip"].as_str()?, d["slots_total"].as_u64()?, types.contains(&"pi30"))
     });
     let Some(target) = target else {
         return bad(StatusCode::BAD_REQUEST, "не знаю, какая прошивка нужна этой плате (старая прошивка не сообщает чип)".into());
@@ -139,8 +153,9 @@ pub async fn update(State(st): State<AppState>, Path(name): Path<String>, body: 
 mod tests {
     #[test]
     fn targets() {
-        assert_eq!(super::target("ESP32-S3", 2).as_deref(), Some("s3-jk2"));
-        assert_eq!(super::target("ESP8266", 1), None);
+        assert_eq!(super::target("ESP32-S3", 2, false).as_deref(), Some("s3-jk2"));
+        assert_eq!(super::target("ESP32-S3", 2, true).as_deref(), Some("s3-pi30-jk2"));
+        assert_eq!(super::target("ESP8266", 1, false), None);
     }
     #[test]
     fn rejects_garbage() {
