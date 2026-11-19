@@ -884,6 +884,8 @@
     if (!n || n === 'scanning') return '<div class="muted"><span class="spin"></span>Плата ищет сети Wi-Fi вокруг себя…</div>';
     const other = !!W.wifi.other;
     if (!other && W.wifi.ssid && !n.some((x) => x.ssid === W.wifi.ssid)) W.wifi.ssid = '';
+    const none = !n.length && !n.error
+      ? `<p class="small warn">Плата не видит ни одной сети. Если на ней раньше была своя прошивка с сохранённым Wi-Fi, она не сканирует эфир — <a href="#" data-usbflashlink="${i}">прошить заново</a> (настройки платы сотрутся). Или введите сеть вручную: «Другая сеть…».</p>` : '';
     const ap = (wifiFails[b.usb] || 0) >= 2
       ? '<p class="small warn">Не выходит дважды. Другой способ: плата раздаёт точку <code>solarbox-XXXX</code> — подключитесь к ней с телефона и выберите сеть там; плата появится ниже сама.</p>' : '';
     return `<div class="wzrow"><label class="wzf"><span>Wi-Fi для платы</span><select id="wz-wifissid">
@@ -894,7 +896,7 @@
       ${other ? `<label class="wzf"><span>Имя сети</span><input id="wz-wifiother" value="${esc(W.wifi.ssid)}" autocomplete="off" data-lpignore="true" data-1p-ignore></label>` : ''}
       <label class="wzf"><span>Пароль Wi-Fi</span><input id="wz-wifipw" type="password" autocomplete="new-password" data-lpignore="true" data-1p-ignore value="${esc(wifiPw)}"></label></div>
       <div class="row"><button class="btn on" data-usbwifi="${i}">Дать плате Wi-Fi</button><button class="btn" data-rescan="${b.usb}">Искать ещё раз</button></div>
-      <p class="muted small">Плата видит сети здесь, у роутера; на месте нужна та, что ловится там. Пароль уйдёт в плату, Solarbox его не хранит.</p>${ap}`;
+      ${none}<p class="muted small">Плата видит сети здесь, у роутера; на месте нужна та, что ловится там. Пароль уйдёт в плату, Solarbox его не хранит.</p>${ap}`;
   }
 
   async function scanNets(port) {
@@ -1014,6 +1016,7 @@
     body.querySelectorAll('[data-pcflash]').forEach((el) => (el.onclick = (e) => { e.preventDefault(); pcFlash[+el.dataset.pcflash] = true; render(); }));
     body.querySelectorAll('[data-routerflash]').forEach((el) => (el.onclick = (e) => { e.preventDefault(); delete pcFlash[+el.dataset.routerflash]; render(); }));
     body.querySelectorAll('[data-usbflash]').forEach((el) => (el.onclick = () => usbFlash(+el.dataset.usbflash)));
+    body.querySelectorAll('[data-usbflashlink]').forEach((el) => (el.onclick = (e) => { e.preventDefault(); usbFlash(+el.dataset.usbflashlink); }));
     body.querySelectorAll('[data-usbwifi]').forEach((el) => (el.onclick = () => usbWifi(+el.dataset.usbwifi, el)));
     body.querySelectorAll('[data-later]').forEach((el) => (el.onclick = () => { const i = +el.dataset.later; W.boards[i] = Object.assign(W.boards[i] || {}, { later: !W.boards[i]?.later }); render(); }));
     body.querySelectorAll('[data-adopt]').forEach((el) => (el.onclick = () => { W.boards[el.dataset.adopt].adopted = true; toast('Плата будет подключена при «Применить»'); render(); }));

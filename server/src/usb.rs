@@ -109,9 +109,33 @@ impl espflash::target::ProgressCallbacks for Progress<'_> {
     fn finish(&mut self, _skipped: bool) {}
 }
 
-/// Write a factory image (bootloader + partitions + app) at 0.
+/// The NVS partition (offset, size) from the factory image's own partition
+/// table at 0x8000: 32-byte entries, magic 0xAA50, type data (1) / nvs (2).
+pub fn nvs_region(image: &[u8]) -> Option<(u32, u32)> {
+    let le = |b: &[u8]| u32::from_le_bytes([b[0], b[1], b[2], b[3]]);
+    let mut at = 0x8000;
+    while let Some(e) = image.get(at..at + 32) {
+        if e[0] != 0xAA || e[1] != 0x50 {
+            return None;
+        }
+        if e[2] == 1 && e[3] == 2 {
+            return Some((le(&e[4..8]), le(&e[8..12])));
+        }
+        at += 32;
+    }
+    None
+}
+
+/// Write a factory image (bootloader + partitions + app) at 0. The board's
+/// settings (Wi-Fi, BMS…) are wiped first: a first flash is a clean start,
+/// and a board that remembers no network scans the air at boot, which is
+/// what the wizard's network list (Improv) shows.
 pub fn flash(usb: &Usb, port: &str, vid: &str, pid: &str, image: &[u8]) -> Result<(), String> {
     let mut f = connect(port, hex(vid), hex(pid))?;
+    if let Some((off, size)) = nvs_region(image) {
+        usb.job.lock().unwrap().insert(port.to_string(), json!({ "state": "flashing", "pct": 0 }));
+        f.erase_region(off, size).map_err(|e| format!("стирание настроек: {e}"))?;
+    }
     let mut p = Progress { usb, port: port.to_string(), total: image.len() };
     f.write_bin_to_flash(0, image, &mut p).map_err(|e| e.to_string())
 }
@@ -397,6 +421,24 @@ mod tests {
         let got = super::improv_parse(&log);
         assert_eq!(got.len(), 1);
         assert_eq!(got[0].0, 4);
+    }
+
+    #[test]
+    fn nvs_from_partition_table() {
+        let mut img = vec![0xFFu8; 0x9000];
+        let entry = |t: u8, st: u8, off: u32, size: u32| {
+            let mut e = vec![0xAA, 0x50, t, st];
+            e.extend_from_slice(&off.to_le_bytes());
+            e.extend_from_slice(&size.to_le_bytes());
+            e.resize(32, 0);
+            e
+        };
+        let mut table = entry(1, 0, 0x9000, 0x2000); // otadata
+        table.extend(entry(0, 0x10, 0x10000, 0x1C0000)); // app0
+        table.extend(entry(1, 2, 0x390000, 0x70000)); // nvs
+        img[0x8000..0x8000 + table.len()].copy_from_slice(&table);
+        assert_eq!(super::nvs_region(&img), Some((0x390000, 0x70000)));
+        assert_eq!(super::nvs_region(&[0u8; 100]), None);
     }
 
     #[test]
