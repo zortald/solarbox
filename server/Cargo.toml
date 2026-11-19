@@ -1,5 +1,6 @@
 [package]
 name = "solarbox"
+license = "AGPL-3.0-or-later"
 version = "0.1.0"
 edition = "2021"
 description = "Push-based telemetry collector + dashboard for off-grid inverter/BMS sites"

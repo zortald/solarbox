@@ -18,7 +18,7 @@ boards ──POST JSON──▶ /api/ingest ──▶ SQLite ──▶ dashboard
 |--------------|-----------------------------------------------------------------|
 | `server/`    | Rust (axum + rusqlite, SQLite bundled), dashboard embedded.     |
 | `server/static/` | Dependency-free dashboard (own canvas chart, no CDN).       |
-| `firmware/`  | The two ESPHome board configs + how they push to `/api/ingest`. |
+| `firmware/`  | ESPHome board firmware (generated) + how boards push to `/api/ingest`. |
 | `deploy/`    | Router image build (armv5/armv7/arm64), push scripts, RouterOS guide. |
 
 ## HTTP API
@@ -76,3 +76,8 @@ then import per [`deploy/routeros.md`](deploy/routeros.md).
 
 It's one binary + a SQLite file. Runs the same on a Mac, a mini-PC, or a
 RouterOS container — point the boards at wherever it listens.
+
+## License
+
+AGPL-3.0-or-later — see `LICENSE`. Changed versions you distribute or let
+others use over a network must be published under the same license.
