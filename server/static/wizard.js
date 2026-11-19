@@ -371,9 +371,15 @@
   function buildCard(b, i) {
     const c = CHIPS[b.chip], st = W.boards[i] || {};
     const parts = kit([b]), sec = 2 + (b.inv ? 1 : 0) + (pwrSrc(b) !== 'inv' ? 1 : 0);
-    const fw = `solarbox-${b.chip}${b.inv ? '-pi30' : ''}${b.nb ? '-jk' + b.nb : ''}.bin`;
+    const t = fwTarget(b), have = FIRMWARE.includes(t);
+    // The image comes first: without it the board never shows up below.
+    const fwBox = have
+      ? `<div class="wzfw"><div><b>Прошивка для этой платы</b><small class="muted"><code>solarbox-firmware-${t}.bin</code> — собирается один раз для всех таких плат, потом сразу</small></div>
+          <button class="btn on" data-fw="${i}">Скачать прошивку</button></div>`
+      : `<div class="wzfw warn"><div><b>Прошивки для такой платы пока нет</b><small>${b.inv ? 'Драйвер инвертора PI30 ещё в работе — плата для инвертора пока не прошивается из Solarbox.' : 'Такое сочетание платы и числа BMS не собирается.'}
+          Можно пройти мастер дальше без неё («Подключу позже») и подключить её, когда прошивка появится.</small></div></div>`;
     const flash = `<ol class="wzlist">
-        <li>На <b>компьютере</b> в Chrome или Edge (с телефона прошить нельзя) — <button class="btn xs" data-fw="${i}">Скачать прошивку</button> <code>${fw}</code></li>
+        <li>Скачайте прошивку (кнопка выше) — на <b>компьютер</b> с Chrome или Edge: с телефона плату не прошить.</li>
         <li>Откройте <a href="https://web.esphome.io" target="_blank" rel="noopener">web.esphome.io</a>, подключите плату по USB → <b>Connect</b> → <b>Install</b> → выберите файл.</li>
         <li>После прошивки там же <b>Configure Wi-Fi</b> — сеть, в которой стоит роутер с Solarbox.</li>
         <li>Без компьютера под рукой: плата сама поднимает точку <code>solarbox-XXXX</code> — подключитесь с телефона и выберите Wi-Fi там.</li>
@@ -382,11 +388,14 @@
     if (st.adopted) wait = `<div class="ok"><span class="dot ok"></span>${st.already ? 'Уже подключена' : 'Подключится при «Применить»'}: ${esc(st.found.ip)} · ${esc(st.found.mac)} · прошивка ${esc(st.found.fw)}</div>`;
     else if (st.found) wait = `<div class="wznew"><div><b>Новая плата</b> <span class="muted small">${esc(c.t)} · ${esc(st.found.ip)} · ${esc(st.found.mac)} · прошивка ${esc(st.found.fw)}</span></div>
         <button class="btn on" data-adopt="${i}">Подключить</button></div>`;
-    else wait = `<div class="muted"><span class="spin"></span>Жду, когда плата появится в сети…${DEMO ? ` <button class="btn xs" data-sim="${i}">имитировать</button>` : ''}</div>`;
+    else if (st.later) wait = `<div class="muted">Подключите позже: «Настройки → Мастер настройки». <button class="btn xs" data-later="${i}">Вернуть</button></div>`;
+    else wait = `<div class="wznew"><div class="muted">${have ? '<span class="spin"></span>Когда плата прошита и в Wi-Fi, она появится здесь сама.' : 'Плата появится здесь, когда будет прошита.'}${DEMO ? ` <button class="btn xs" data-sim="${i}">имитировать</button>` : ''}</div>
+        <button class="btn" data-later="${i}">Подключу позже</button></div>`;
     const open = st.adopted ? '' : 'open';
     return `<div class="panel wzboard">
       <div class="ph"><h2>Плата ${i + 1} · ${c.t}</h2><span class="muted small">${roles(b)}</span></div>
       ${tested(b) ? '' : '<p class="muted small">Такая сборка ещё не проверена на объекте — оценка.</p>'}
+      ${fwBox}
       ${b.nb ? '<p class="small">BMS плата слушает по Bluetooth — к ним ничего не паяется. Ставить ближе к батарее (≈ 5–10 м), не в металлический шкаф.</p>' : ''}
       <details ${open}><summary>1. Детали</summary><ul class="wzlist">${parts.map(([t, q, n]) => `<li>${t}${q ? ` — ${q}` : ''}${n ? ` <span class="muted small">(${n})</span>` : ''}</li>`).join('')}</ul></details>
       <details ${open}><summary>2. Плата и выводы</summary>${boardSvg(b)}</details>
@@ -667,8 +676,11 @@
   setInterval(poll, 3000);
 
   // Firmware for a planned board: built on demand by the relay, reused after.
+  // Library images (relay /v1/firmware/…): JK boards so far, PI30 to come.
+  const FIRMWARE = ['c3-jk1', 'c3-jk2', 's3-jk1', 's3-jk2', 's3-jk3', 'esp32-jk1', 'esp32-jk2', 'esp32-jk3'];
+  const fwTarget = (b) => `${b.chip}${b.inv ? '-pi30' : ''}${b.nb ? '-jk' + b.nb : ''}`;
   async function firmware(b, btn) {
-    const t = `${b.chip}${b.inv ? '-pi30' : ''}${b.nb ? '-jk' + b.nb : ''}`;
+    const t = fwTarget(b);
     btn.disabled = true;
     try {
       for (let k = 0; k < 80; k++) {
@@ -720,7 +732,7 @@
       return W.want.invType === 'none' && W.want.bmsType === 'none' ? 'Выберите, что подключаем' : 'Пока нечего подключать: выбранное оборудование не поддерживается';
     if (id === 'site' && !W.site.name.trim()) return 'Введите название объекта';
     if (id === 'build') {
-      const left = W.plan.map((b, i) => (W.boards[i]?.adopted ? 0 : i + 1)).filter(Boolean);
+      const left = W.plan.map((b, i) => (W.boards[i]?.adopted || W.boards[i]?.later ? 0 : i + 1)).filter(Boolean);
       if (left.length) return 'Ещё не подключена плата ' + left.join(', ');
     }
     if (id === 'battery') {
@@ -778,6 +790,7 @@
       const k = el.dataset.have; W.have[k] = Math.max(0, Math.min(9, W.have[k] + +el.dataset.d)); render();
     }));
     body.querySelectorAll('[data-sim]').forEach((el) => (el.onclick = () => { const i = el.dataset.sim; clearTimeout(sims[i]); sims[i] = 0; simulate(+i, true); }));
+    body.querySelectorAll('[data-later]').forEach((el) => (el.onclick = () => { const i = +el.dataset.later; W.boards[i] = Object.assign(W.boards[i] || {}, { later: !W.boards[i]?.later }); render(); }));
     body.querySelectorAll('[data-adopt]').forEach((el) => (el.onclick = () => { W.boards[el.dataset.adopt].adopted = true; toast('Плата будет подключена при «Применить»'); render(); }));
     body.querySelectorAll('[data-fw]').forEach((el) => (el.onclick = () => (DEMO ? toast('Тестовый режим: прошивка не скачивается') : firmware(W.plan[+el.dataset.fw], el))));
     body.querySelectorAll('[data-pack]').forEach((el) => (el.onchange = () => {

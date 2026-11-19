@@ -355,3 +355,9 @@ body.wz main { max-width: 640px; }
 .wzitem:first-of-type { border-top: 0; }
 .wzit { display: flex; justify-content: space-between; gap: 8px; margin-bottom: 2px; }
 .wzmark { flex: none; }
+
+/* wizard: the board's firmware, first thing on its card */
+.wzfw { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px; margin: 8px 0 12px;
+  border: 1px solid var(--line); border-radius: 10px; }
+.wzfw small { display: block; margin-top: 2px; }
+.wzfw.warn { border-color: var(--warn, #d29922); }
