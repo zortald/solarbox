@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#0f1419">
+  <link rel="manifest" href="/manifest.webmanifest">
+  <link rel="icon" type="image/png" sizes="192x192" href="/icon-192.png">
+  <link rel="apple-touch-icon" href="/icon-180.png">
+  <title>Solarbox · вход</title>
+  <link rel="stylesheet" href="/style.css">
+  <style>
+    .login { max-width: 360px; margin: 12vh auto 0; display: grid; gap: 12px; }
+    .login h1 { font-size: 20px; text-align: center; }
+    .login label { display: grid; gap: 4px; font-size: 13px; color: var(--muted); }
+    .login input { background: var(--bg); color: var(--fg); border: 1px solid var(--line); border-radius: 8px; padding: 9px 10px; font: inherit; font-size: 15px; }
+    .login .btn { padding: 10px; font-size: 15px; }
+    #err { min-height: 1.4em; }
+  </style>
+</head>
+<body>
+  <main>
+    <form class="panel login" id="f">
+      <h1>solarbox</h1>
+      <label>Логин роутера<input id="user" autocomplete="username" autocapitalize="none" spellcheck="false"></label>
+      <label>Пароль<input id="pw" type="password" autocomplete="current-password" required></label>
+      <button class="btn on" id="go">Войти</button>
+      <div class="small bad" id="err"></div>
+      <p class="muted small">Логин и пароль — те же, что у роутера MikroTik. Если роутер не отвечает, оставьте логин пустым и введите аварийный пароль.</p>
+    </form>
+  </main>
+  <script>
+    // Plain page, no SB core: it has to work before there is a session.
+    const f = document.getElementById('f'), err = document.getElementById('err'), go = document.getElementById('go');
+    f.onsubmit = async (e) => {
+      e.preventDefault();
+      err.textContent = ''; go.disabled = true;
+      try {
+        const r = await fetch('/api/login', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ user: document.getElementById('user').value, password: document.getElementById('pw').value }) });
+        const d = await r.json().catch(() => ({}));
+        if (r.ok) { location.href = '/'; return; }
+        err.textContent = d.error || 'HTTP ' + r.status;
+      } catch (e) { err.textContent = 'сервер недоступен'; }
+      go.disabled = false;
+    };
+    document.getElementById('user').focus();
+  </script>
+</body>
+</html>

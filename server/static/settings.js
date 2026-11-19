@@ -52,7 +52,7 @@
       catch (e) { toast('Не получилось: ' + e.message, true); }
     }));
     $('#set-config').innerHTML = (c.load_error ? `<p class="bad">config.json с ошибкой, работает прежний: ${esc(c.load_error)}</p>` : '') +
-      `<p class="muted small">Управление: ${c.admin ? 'включено (по паролю)' : 'выключено'} · плат: ${c.boards.length} · правил: ${c.actions.length}</p>` +
+      `<p class="muted small">Плат: ${c.boards.length} · правил: ${c.actions.length}</p>` +
       `<details><summary>config.json</summary><pre>${esc(JSON.stringify(Object.fromEntries(Object.entries(c).filter(([k]) => !['load_error', 'admin'].includes(k))), null, 2))}</pre></details>`;
   }
 
@@ -115,6 +115,8 @@
       ${t.token_set ? `
       <label class="chk"><input type="checkbox" id="tg-notify"${t.notify_changes ? ' checked' : ''}> Сообщать об изменениях настроек
         <span class="muted small">— инвертор, BMS, прошивки плат, автоматизации, конфигурация, получатели</span></label>
+      <label class="chk"><input type="checkbox" id="tg-access"${t.notify_access ? ' checked' : ''}> Сообщать о входах и доступе
+        <span class="muted small">— каждый вход, серии неверных паролей, доступ из интернета открыт/закрыт, смена внешнего IP</span></label>
       <h3>Получатели</h3>
       ${t.chats.length ? t.chats.map((c) => `<div class="frow"><span>${who(c)}</span><span></span><button class="btn xs" data-tdel="${esc(c.id)}">✕</button></div>`).join('')
         : '<p class="muted small">Пока никого. Напиши своему боту <code>/start</code> — появишься ниже в «Хотят доступ».</p>'}
@@ -131,6 +133,10 @@
     if (!t.token_set) return;
     $('#tg-notify').onchange = async (e) => {
       try { await api('/api/telegram', { method: 'PUT', json: { notify_changes: e.target.checked } }); toast(e.target.checked ? 'Изменения будут приходить в Telegram' : 'Изменения больше не присылаются'); }
+      catch (err) { e.target.checked = !e.target.checked; toast(err.message, true); }
+    };
+    $('#tg-access').onchange = async (e) => {
+      try { await api('/api/telegram', { method: 'PUT', json: { notify_access: e.target.checked } }); toast(e.target.checked ? 'Входы будут приходить в Telegram' : 'Входы больше не присылаются'); }
       catch (err) { e.target.checked = !e.target.checked; toast(err.message, true); }
     };
     const add = async (id) => { try { await api('/api/telegram/chats', { method: 'POST', json: { id } }); toast('Добавлен'); tg(); } catch (e) { toast(e.message, true); } };

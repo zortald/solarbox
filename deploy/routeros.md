@@ -65,10 +65,19 @@ RouterOS 7.25 syntax (`list=` / `mountlists=`):
 ```
 
 Optional env (`/container/envs/add list=sb-env key=… value=…`, then
-`envlists=sb-env`): `SOLARBOX_ADMIN_PASSWORD` enables control and admin pages,
-`SOLARBOX_TOKEN` makes ingest require `X-Token`.
+`envlists=sb-env`): `SOLARBOX_ADMIN_PASSWORD` sets the emergency password
+(otherwise one is generated into `/data/admin-password` and printed once to the
+container log), `SOLARBOX_TOKEN` makes ingest require `X-Token`.
 
-Dashboard `http://<router-lan-ip>:8080/` · health `/healthz`.
+Dashboard `https://<router-lan-ip>:8080/` (self-signed certificate, accept it
+once per device after comparing the fingerprint on the «Доступ» page; plain
+`http://` redirects). Log in with the router's own login and password, or with
+an empty login and the emergency password. Boards keep pushing over plain HTTP
+to the same port. Health `/healthz` (both). Details: `docs/remote-access.md`.
+
+Solarbox checks logins against the router's REST API on its gateway
+(`172.18.0.1`, service `www`); the router's firewall must let the container
+reach it.
 
 ## Updating
 

@@ -60,22 +60,11 @@ pub(crate) fn find(st: &AppState, name: &str) -> Option<Board> {
 }
 
 fn is_admin(st: &AppState, headers: &HeaderMap) -> bool {
-    match &st.admin {
-        Some(pw) => headers
-            .get("x-admin")
-            .and_then(|v| v.to_str().ok())
-            .map(|v| v == pw)
-            .unwrap_or(false),
-        None => false,
-    }
+    st.auth.user(headers).is_some()
 }
 
-fn admin_denied(st: &AppState) -> Response {
-    if st.admin.is_none() {
-        err(StatusCode::FORBIDDEN, "control is disabled: SOLARBOX_ADMIN_PASSWORD is not set")
-    } else {
-        err(StatusCode::UNAUTHORIZED, "admin password required")
-    }
+fn admin_denied(_st: &AppState) -> Response {
+    err(StatusCode::UNAUTHORIZED, "нужно войти")
 }
 
 /// Percent-encode one path segment / query value.
@@ -182,7 +171,7 @@ pub async fn list(State(st): State<AppState>) -> Response {
             o
         })
         .collect();
-    Json(serde_json::json!({ "boards": items, "admin": st.admin.is_some() })).into_response()
+    Json(serde_json::json!({ "boards": items, "admin": true })).into_response()
 }
 
 /// Reachability + latency of the board's web server.

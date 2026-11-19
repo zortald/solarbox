@@ -5,6 +5,8 @@
 //! `/api/series` and `/api/catalog`. The whole thing is one static binary with
 //! the UI baked in, meant to sit in a container on the site's router.
 
+mod access;
+mod auth;
 mod automations;
 mod boards;
 mod changes;
@@ -16,8 +18,10 @@ mod money;
 mod files;
 mod ota;
 mod outages;
+mod router;
 mod sysinfo;
 mod telegram;
+mod tls;
 mod tz;
 
 use axum::{
@@ -50,8 +54,10 @@ struct AppState {
     config: Arc<config::Store>,
     /// Live UI overrides (served before the embedded files).
     static_dir: PathBuf,
-    /// Password for anything that changes state (None = control disabled).
-    admin: Option<String>,
+    /// Login, sessions, emergency password.
+    auth: Arc<auth::Auth>,
+    /// Our certificate's fingerprint and key pin.
+    tls: tls::Info,
     ota_busy: Arc<AtomicBool>,
     /// CPU sampler + process start time for /api/system.
     sys: Arc<sysinfo::Sampler>,
@@ -97,6 +103,10 @@ async fn main() {
     // Safety net for the router's flash: oldest history goes first past this.
     let max_db: i64 = env("SOLARBOX_MAX_DB_MB", "40").parse::<i64>().unwrap_or(40).max(5) * 1_048_576;
 
+    // New state files (sessions, TLS, router) go here; older ones have their own variables.
+    let data_dir = PathBuf::from(env("SOLARBOX_DATA_DIR", "/data"));
+    let (tls_cfg, tls_info) = tls::load_or_create(&data_dir).expect("TLS certificate");
+    eprintln!("[tls] https on the same port, certificate SHA-256 {}", tls_info.fingerprint);
     let conn = db::open(&db_path).expect("open database");
     let outage_detector = Arc::new(outages::Detector::open(&conn).expect("outages"));
     let db = Arc::new(Mutex::new(conn));
@@ -111,7 +121,8 @@ async fn main() {
             config::Config::default_with(&env("SOLARBOX_BOARDS", "")),
         )),
         static_dir: PathBuf::from(env("SOLARBOX_STATIC_DIR", "/data/static")),
-        admin: std::env::var("SOLARBOX_ADMIN_PASSWORD").ok().filter(|s| !s.is_empty()),
+        auth: Arc::new(auth::Auth::open(&data_dir)),
+        tls: tls_info,
         ota_busy: Arc::new(AtomicBool::new(false)),
         sys: Arc::new(sysinfo::Sampler::new()),
         db_path: db_path.clone(),
@@ -171,9 +182,9 @@ async fn main() {
             }
         });
     }
-    let control = format!("{} board(s), ui overrides in {}, control {}", state.config.get().boards.len(),
+    let control = format!("{} board(s), ui overrides in {}, router {}", state.config.get().boards.len(),
         state.static_dir.display(),
-        if state.admin.is_some() { "enabled" } else { "disabled" });
+        router::base().unwrap_or_else(|| "unknown".into()));
 
     // Background maintenance: tiered downsampling, then optional hard retention.
     {
@@ -208,6 +219,12 @@ async fn main() {
         });
     }
 
+    // Plain HTTP: board pushes only; browsers are sent to https.
+    let plain = Router::new()
+        .route("/api/ingest", post(ingest))
+        .route("/healthz", get(|| async { "ok" }))
+        .fallback(tls::to_https)
+        .with_state(state.clone());
     let app = Router::new()
         .route("/api/ingest", post(ingest))
         .route("/api/latest", get(latest))
@@ -229,6 +246,10 @@ async fn main() {
             post(boards::flash).layer(DefaultBodyLimit::max(8 * 1024 * 1024)),
         )
         .route("/api/admin/check", post(boards::admin_check))
+        .route("/api/login", post(auth::login))
+        .route("/api/logout", post(auth::logout))
+        .route("/api/logout-all", post(auth::logout_all))
+        .route("/api/me", get(auth::me))
         .route("/api/config", get(files::get_config).put(files::put_config))
         .route("/api/files", get(files::list))
         .route("/api/system", get(sysinfo::system))
@@ -242,6 +263,7 @@ async fn main() {
         .route("/healthz", get(|| async { "ok" }))
         .route("/", get(|State(st): State<AppState>| async move { files::serve(&st, "index.html") }))
         .route("/*path", get(asset))
+        .layer(axum::middleware::from_fn_with_state(state.clone(), auth::gate))
         .with_state(state);
 
     let listener = tokio::net::TcpListener::bind(&addr)
@@ -251,10 +273,7 @@ async fn main() {
         "solarbox on {addr}  db={db_path}  retention={retention_days}d  auth={}  {control}",
         if token.is_some() { "token" } else { "open" }
     );
-    axum::serve(listener, app)
-        .with_graceful_shutdown(shutdown())
-        .await
-        .unwrap();
+    tls::serve(listener, tls_cfg, app, plain, shutdown()).await;
 }
 
 fn env(key: &str, default: &str) -> String {
@@ -435,19 +454,19 @@ fn parse_tiers(s: &str) -> Option<Vec<db::Tier>> {
 // ---- automations ----------------------------------------------------------
 
 fn admin_header(st: &AppState, h: &HeaderMap) -> bool {
-    matches!((&st.admin, h.get("x-admin").and_then(|v| v.to_str().ok())), (Some(p), Some(v)) if p == v)
+    st.auth.user(h).is_some()
 }
 
 async fn autom_get(State(st): State<AppState>, h: HeaderMap) -> Response {
     if !admin_header(&st, &h) {
-        return (StatusCode::UNAUTHORIZED, Json(serde_json::json!({ "ok": false, "error": "admin password required" }))).into_response();
+        return (StatusCode::UNAUTHORIZED, Json(serde_json::json!({ "ok": false, "error": "нужно войти" }))).into_response();
     }
     Json(st.autom.snapshot()).into_response()
 }
 
 async fn autom_put(State(st): State<AppState>, h: HeaderMap, body: String) -> Response {
     if !admin_header(&st, &h) {
-        return (StatusCode::UNAUTHORIZED, Json(serde_json::json!({ "ok": false, "error": "admin password required" }))).into_response();
+        return (StatusCode::UNAUTHORIZED, Json(serde_json::json!({ "ok": false, "error": "нужно войти" }))).into_response();
     }
     let before = st.autom.rules();
     match st.autom.save(&body) {
@@ -465,7 +484,7 @@ async fn autom_put(State(st): State<AppState>, h: HeaderMap, body: String) -> Re
 /// Run a rule's actions now (test button), regardless of its condition.
 async fn autom_run(State(st): State<AppState>, Path(id): Path<String>, h: HeaderMap) -> Response {
     if !admin_header(&st, &h) {
-        return (StatusCode::UNAUTHORIZED, Json(serde_json::json!({ "ok": false, "error": "admin password required" }))).into_response();
+        return (StatusCode::UNAUTHORIZED, Json(serde_json::json!({ "ok": false, "error": "нужно войти" }))).into_response();
     }
     match st.autom.rule(&id) {
         Some(r) => {
@@ -480,7 +499,7 @@ async fn autom_run(State(st): State<AppState>, Path(id): Path<String>, h: Header
 // ---- telegram ---------------------------------------------------------------
 
 fn need_admin() -> Response {
-    (StatusCode::UNAUTHORIZED, Json(serde_json::json!({ "ok": false, "error": "admin password required" }))).into_response()
+    (StatusCode::UNAUTHORIZED, Json(serde_json::json!({ "ok": false, "error": "нужно войти" }))).into_response()
 }
 
 /// Telegram status (the token itself is never returned): bot, people, pending requests.
@@ -491,6 +510,7 @@ async fn tg_get(State(st): State<AppState>, h: HeaderMap) -> Response {
         "token_set": t.is_some(),
         "bot": t.as_ref().and_then(|t| t.bot.clone()),
         "notify_changes": t.as_ref().map(|t| t.notify_changes).unwrap_or(true),
+        "notify_access": t.as_ref().map(|t| t.notify_access).unwrap_or(true),
         "chats": t.map(|t| t.chats).unwrap_or_default(),
         "pending": st.tg.pending(),
     }))
@@ -498,7 +518,7 @@ async fn tg_get(State(st): State<AppState>, h: HeaderMap) -> Response {
 }
 
 #[derive(Deserialize)]
-struct TgBody { token: Option<String>, #[serde(default)] disable: bool, notify_changes: Option<bool> }
+struct TgBody { token: Option<String>, #[serde(default)] disable: bool, notify_changes: Option<bool>, notify_access: Option<bool> }
 
 /// Save a bot token (validated via getMe, command menu registered), or
 /// `{"disable": true}` to forget everything.
@@ -507,6 +527,19 @@ async fn tg_put(State(st): State<AppState>, h: HeaderMap, Json(b): Json<TgBody>)
     if b.disable {
         return match st.tg.set(None) {
             Ok(_) => Json(serde_json::json!({ "ok": true })).into_response(),
+            Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({ "ok": false, "error": e }))).into_response(),
+        };
+    }
+    if let (Some(on), None) = (b.notify_access, &b.token) {
+        let Some(mut t) = st.tg.get() else {
+            return (StatusCode::BAD_REQUEST, Json(serde_json::json!({ "ok": false, "error": "сначала токен бота" }))).into_response();
+        };
+        t.notify_access = on;
+        return match st.tg.set(Some(t)) {
+            Ok(_) => {
+                changes::notify(&st, format!("Уведомления о входах и доступе {}", if on { "включены" } else { "выключены" }), changes::By::Dashboard);
+                Json(serde_json::json!({ "ok": true })).into_response()
+            }
             Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({ "ok": false, "error": e }))).into_response(),
         };
     }
@@ -539,6 +572,7 @@ async fn tg_put(State(st): State<AppState>, h: HeaderMap, Json(b): Json<TgBody>)
     tg.token = token;
     tg.chats = prev.as_ref().map(|t| t.chats.clone()).unwrap_or_default();
     tg.notify_changes = prev.as_ref().map(|t| t.notify_changes).unwrap_or(true);
+    tg.notify_access = prev.as_ref().map(|t| t.notify_access).unwrap_or(true);
     tg.bot = Some(bot.clone());
     match st.tg.set(Some(tg)) {
         Ok(_) => {

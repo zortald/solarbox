@@ -16,12 +16,11 @@ use axum::{
 const MAX_FILE: usize = 2 * 1024 * 1024;
 
 fn admin_ok(st: &AppState, h: &HeaderMap) -> bool {
-    matches!((&st.admin, h.get("x-admin").and_then(|v| v.to_str().ok())), (Some(p), Some(v)) if p == v)
+    st.auth.user(h).is_some()
 }
 
-fn deny(st: &AppState) -> Response {
-    let msg = if st.admin.is_none() { "control is disabled: SOLARBOX_ADMIN_PASSWORD is not set" } else { "admin password required" };
-    (StatusCode::UNAUTHORIZED, Json(serde_json::json!({ "ok": false, "error": msg }))).into_response()
+fn deny(_st: &AppState) -> Response {
+    (StatusCode::UNAUTHORIZED, Json(serde_json::json!({ "ok": false, "error": "нужно войти" }))).into_response()
 }
 
 fn bad(code: StatusCode, msg: impl Into<String>) -> Response {
@@ -95,12 +94,12 @@ pub async fn delete(State(st): State<AppState>, Path(name): Path<String>, h: Hea
     }
 }
 
-/// Current config (public: it holds no secrets) + last load error, if any.
+/// Current config (it holds no secrets) + last load error, if any.
 pub async fn get_config(State(st): State<AppState>) -> Response {
     let cfg = st.config.get();
     let mut v = serde_json::to_value(&*cfg).unwrap_or_default();
     v["load_error"] = serde_json::json!(st.config.error());
-    v["admin"] = serde_json::json!(st.admin.is_some());
+    v["admin"] = serde_json::json!(true);
     Json(v).into_response()
 }
 

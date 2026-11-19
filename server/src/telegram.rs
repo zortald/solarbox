@@ -29,6 +29,9 @@ pub struct Tg {
     /// Mirror every settings change to the chats (on unless switched off).
     #[serde(default = "yes")]
     pub notify_changes: bool,
+    /// Logins, failed-login series, access opened/closed, public IP changes.
+    #[serde(default = "yes")]
+    pub notify_access: bool,
     /// Legacy single-chat field (migrated into `chats` on load).
     #[serde(default, skip_serializing)]
     chat_id: Option<String>,

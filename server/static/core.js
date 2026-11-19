@@ -1,4 +1,4 @@
-// Shared state and helpers: latest pushed values, admin login, navigation.
+// Shared state and helpers: latest pushed values, session, navigation.
 // Pages register themselves with SB.page(name, {show, hide, tick}).
 
 const SB = (() => {
@@ -39,14 +39,14 @@ const SB = (() => {
   }
 
   // ---- API ----
-  const admin = () => localStorage.getItem('sbAdmin') || '';
+  // The session is an HttpOnly cookie; without it the server answers 401 → login page.
   async function api(path, opts = {}) {
     const headers = Object.assign({}, opts.headers || {});
-    if (admin()) headers['X-Admin'] = admin();
     if (opts.json !== undefined) { headers['Content-Type'] = 'application/json'; opts.body = JSON.stringify(opts.json); }
     const r = await fetch(path, { method: opts.method || (opts.body ? 'POST' : 'GET'), headers, body: opts.body });
     let data = null;
     try { data = await r.json(); } catch (e) { /* non-JSON */ }
+    if (r.status === 401 && data && data.login) { location.href = '/login.html'; throw new Error(data.error); }
     if (!r.ok) throw new Error((data && data.error) || 'HTTP ' + r.status);
     return data;
   }
@@ -56,13 +56,13 @@ const SB = (() => {
   // ---- dialogs (own modals instead of the browser's confirm/prompt) ----
   // Red confirm button for anything that touches real hardware or deletes something.
   const DANGER = /реальн|Прошить|Перезагруз|Удалить|Выполнить|Отключить|Убрать|установить|включить|выключить/i;
-  function modal({ text, ok = 'OK', danger, input }) {
+  function modal({ text, ok = 'OK', danger, input, extra }) {
     return new Promise((res) => {
       const w = document.createElement('div');
       w.className = 'modal-wrap';
       w.innerHTML = `<div class="modal" role="dialog"><div class="mtext"></div>` +
         (input ? '<input class="minput" type="password" autocomplete="current-password">' : '') +
-        `<div class="mbtns"><button class="btn mcancel">Отмена</button><button class="btn mok ${danger ? 'danger' : 'on'}">${ok}</button></div></div>`;
+        `<div class="mbtns"><button class="btn mcancel">Отмена</button>${extra ? `<button class="btn mextra">${extra}</button>` : ''}<button class="btn mok ${danger ? 'danger' : 'on'}">${ok}</button></div></div>`;
       w.querySelector('.mtext').textContent = text;
       document.body.appendChild(w);
       const inp = w.querySelector('.minput');
@@ -72,6 +72,7 @@ const SB = (() => {
       document.addEventListener('keydown', key);
       w.querySelector('.mcancel').onclick = no;
       w.querySelector('.mok').onclick = yes;
+      if (extra) w.querySelector('.mextra').onclick = () => done('extra');
       w.onclick = (e) => { if (e.target === w) no(); };
       setTimeout(() => (inp || w.querySelector('.mok')).focus(), 30);
     });
@@ -85,40 +86,22 @@ const SB = (() => {
     clearTimeout(toast.t); toast.t = setTimeout(() => (m.className = ''), bad ? 6000 : 3500);
   }
 
-  // ---- admin login ----
-  let isAdmin = false, controlEnabled = true, shownAdmin = false;
+  // ---- session ----
+  // Only logged-in users get this far (the server sends everyone else to
+  // /login.html), and whoever is logged in may do everything.
+  const isAdmin = true;
+  async function logout() {
+    const r = await modal({ text: 'Выйти из solarbox на этом устройстве? «Выйти везде» закрывает все сессии на всех устройствах.', ok: 'Выйти', extra: 'Выйти везде' });
+    if (r === false) return;
+    try { await api(r === 'extra' ? '/api/logout-all' : '/api/logout', { method: 'POST' }); } catch (e) { /* going to the login page anyway */ }
+    location.href = '/login.html';
+  }
   function renderAdmin() {
-    // Pages that show admin-only panels render them on show(); redo that when
-    // the login state changes while the page is open.
-    if (shownAdmin !== isAdmin) { shownAdmin = isAdmin; pages[current]?.hide?.(); pages[current]?.show?.(); }
     const b = $('#admin');
-    b.innerHTML = isAdmin ? '<span class="adot"></span>Управление' : 'Войти';
-    b.classList.toggle('authed', isAdmin);
-    document.body.classList.toggle('admin', isAdmin);
+    b.textContent = 'Выйти';
+    document.body.classList.add('admin');
   }
-  async function login() {
-    if (isAdmin) {
-      if (await ask('Выйти из режима управления?', { ok: 'Выйти' })) { localStorage.removeItem('sbAdmin'); isAdmin = false; renderAdmin(); }
-      return;
-    }
-    if (!controlEnabled) return toast('Управление выключено на сервере (не задан SOLARBOX_ADMIN_PASSWORD)', true);
-    const pw = await askText('Пароль управления');
-    if (!pw) return;
-    localStorage.setItem('sbAdmin', pw);
-    try { await api('/api/admin/check', { method: 'POST' }); isAdmin = true; toast('Режим управления включён'); }
-    catch (e) { localStorage.removeItem('sbAdmin'); toast('Неверный пароль', true); }
-    renderAdmin();
-  }
-  async function checkAdmin() {
-    try { const b = await api('/api/boards'); controlEnabled = b.admin; } catch (e) {}
-    if (admin()) { try { await api('/api/admin/check', { method: 'POST' }); isAdmin = true; } catch (e) { isAdmin = false; } }
-    renderAdmin();
-  }
-  function requireAdmin() {
-    if (isAdmin) return true;
-    toast('Сначала войди в режим управления («Войти» в меню)', true);
-    return false;
-  }
+  const requireAdmin = () => true;
 
   // ---- latest values ----
   async function refreshLatest() {
@@ -186,13 +169,13 @@ const SB = (() => {
   }
 
   async function start() {
-    $('#admin').onclick = () => { $('#nav').classList.remove('open'); login(); };
+    $('#admin').onclick = () => { $('#nav').classList.remove('open'); logout(); };
     $('#menu-btn').onclick = () => $('#nav').classList.toggle('open');
     $('#nav-shade').onclick = () => $('#nav').classList.remove('open');
     document.querySelectorAll('nav a').forEach((a) => (a.onclick = () => $('#nav').classList.remove('open')));
     window.addEventListener('hashchange', go);
     await loadConfig();
-    checkAdmin();
+    renderAdmin();
     refreshLatest().then(go);
     stream();
     setInterval(refreshLatest, 30000);
@@ -200,5 +183,5 @@ const SB = (() => {
   }
 
   return { $, esc, BOARDS, L, T, v, fresh, age, ago, dur, num, api, entity, act, toast, requireAdmin, page, start, ask, askText,
-    get isAdmin() { return isAdmin; }, get cfg() { return cfg; } };
+    isAdmin, get cfg() { return cfg; } };
 })();

@@ -31,7 +31,7 @@
       <a href="#history">История</a>
       <a href="#automations">Автоматизации</a>
       <a href="#settings">Настройки</a>
-      <button id="admin" class="btn">Войти</button>
+      <button id="admin" class="btn">Выйти</button>
     </nav>
     <div id="nav-shade"></div>
   </header>
@@ -154,9 +154,9 @@
   <script src="/automations.js"></script>
   <script>
     SB.start();
-    // Service workers only run on HTTPS (or localhost); on plain http the page
-    // still works and can be added to the home screen as a shortcut.
-    if ('serviceWorker' in navigator && window.isSecureContext) navigator.serviceWorker.register('/sw.js');
+    // Service workers need a trusted certificate; with the self-signed one the
+    // registration fails and the page works as a plain home-screen shortcut.
+    if ('serviceWorker' in navigator && window.isSecureContext) navigator.serviceWorker.register('/sw.js').catch(() => {});
   </script>
 </body>
 </html>
