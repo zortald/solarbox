@@ -375,7 +375,7 @@
     const parts = kit([b]), sec = 2 + (b.inv ? 1 : 0) + (pwrSrc(b) !== 'inv' ? 1 : 0);
     const t = fwTarget(b), have = FIRMWARE.includes(t);
     // The image comes first: without it the board never shows up below.
-    const fwBox = b.usb && have ? usbBox(b, i) : have
+    const fwBox = b.usb && usbTarget(b) ? usbBox(b, i) : have
       ? `<div class="wzfw"><div><b>Прошивка для этой платы</b><small class="muted"><code>solarbox-firmware-${t}.bin</code> — собирается один раз для всех таких плат, потом сразу</small></div>
           <button class="btn on" data-fw="${i}">Скачать прошивку</button></div>`
       : `<div class="wzfw warn"><div><b>Прошивки для такой платы пока нет</b><small>${b.inv ? 'Драйвер инвертора PI30 ещё в работе — плата для инвертора пока не прошивается из Solarbox.' : 'Такое сочетание платы и числа BMS не собирается.'}
@@ -619,8 +619,10 @@
         const s = W.scan?.find((x) => x.mac === mac);
         return { slot: k + 1, bms_mac: mac, proto: s?.proto || 'JK02_32S', device: nbms === 1 ? 'bms' : 'bms' + nbms };
       });
-      adopt.push({ mac: f.mac, ip: f.ip, chip: f.chip || CHIPS[b.chip].t, title: b.inv ? 'Инвертор' : 'АКБ · JK BMS',
-        name: b.inv ? 'inverter' : firstBms ? 'bms' : 'bms-board' + (i + 1), slots });
+      // Named by what it runs now (a board meant for both may have the BMS part only yet).
+      const inv = b.inv && f.type === 'pi30';
+      adopt.push({ mac: f.mac, ip: f.ip, chip: f.chip || CHIPS[b.chip].t, title: inv ? 'Инвертор' : 'АКБ · JK BMS',
+        name: inv ? 'inverter' : firstBms ? 'bms' : 'bms-board' + (i + 1), slots });
     });
     return { ui, site: { name: W.site.name }, money: { day: +W.money.day || 0, night: !!W.money.night, nday: +W.money.nday || 0, from: +W.money.from, to: +W.money.to },
       tg: { token: W.tg.token.trim() }, adopt };
@@ -656,7 +658,9 @@
         return;
       }
       const want = b.inv ? 'pi30' : 'jk-ble';
-      const d = disc.find((x) => x.type === want && !claimed.has(x.mac) && x.age < 120);
+      const um = b.usb && (() => { const p = usb.ports.find((x) => x.port === b.usb); return (p?.board?.mac || p?.serial || '').toUpperCase(); })();
+      const d = um ? disc.find((x) => x.mac === um && x.age < 120)
+        : disc.find((x) => x.type === want && !claimed.has(x.mac) && x.age < 120);
       if (!d) return;
       claimed.add(d.mac);
       W.boards[i] = { found: { mac: d.mac, ip: d.ip, fw: d.fw || '?', type: d.type, chip: d.chip || '' }, adopted: !!d.adopted_as, already: d.adopted_as };
@@ -681,6 +685,9 @@
   // Library images (relay /v1/firmware/…): JK boards so far, PI30 to come.
   const FIRMWARE = ['c3-jk1', 'c3-jk2', 's3-jk1', 's3-jk2', 's3-jk3', 'esp32-jk1', 'esp32-jk2', 'esp32-jk3'];
   const fwTarget = (b) => `${b.chip}${b.inv ? '-pi30' : ''}${b.nb ? '-jk' + b.nb : ''}`;
+  // A board in the router's USB: the full image if the library has it, else
+  // its BMS part now (the inverter comes later over the air).
+  const usbTarget = (b) => (FIRMWARE.includes(fwTarget(b)) ? fwTarget(b) : b.nb && FIRMWARE.includes(`${b.chip}-jk${b.nb}`) ? `${b.chip}-jk${b.nb}` : null);
   async function firmware(b, btn) {
     const t = fwTarget(b);
     btn.disabled = true;
@@ -785,7 +792,8 @@
 
   // On the board's card: flash it right from the router, then its Wi-Fi.
   function usbBox(b, i) {
-    const p = usb.ports.find((x) => x.port === b.usb), j = p?.job, t = fwTarget(b), st = W.boards[i] || {};
+    const p = usb.ports.find((x) => x.port === b.usb), j = p?.job, t = usbTarget(b), st = W.boards[i] || {};
+    const partial = t !== fwTarget(b) ? '<p class="small warn">Прошивки с инвертором пока нет (драйвер PI30 в работе). Сейчас плата прошьётся для BMS, инвертор добавится обновлением по воздуху — перепрошивать через USB не придётся.</p>' : '';
     if (!p) return `<div class="wzfw warn"><div><b>Плату вынули из USB роутера</b><small>Воткните её обратно — продолжим с того же места.</small></div></div>`;
     let body;
     if (st.wifi) body = `<div class="ok">✓ Прошита и в Wi-Fi${st.wifi !== true ? `: ${esc(st.wifi)}` : ''}. Можно отключать от роутера и нести на место — дальше она появится ниже сама.</div>`;
@@ -798,12 +806,12 @@
       { fetching: 'Получаю прошивку…', building: 'Прошивка собирается (≈3–5 мин, один раз для всех таких плат)…', flashing: `Прошиваю… ${j.pct || 0} %`, verifying: 'Проверяю записанное…' }[j.state]}</div>`;
     else body = `${j?.state === 'failed' ? `<p class="warn small">Не получилось: ${esc(j.error)}</p>` : ''}
       <button class="btn on" data-usbflash="${i}">Прошить</button>`;
-    return `<div class="wzfw"><div style="flex:1"><b>Плата в USB роутера</b><small class="muted">${esc(p.board?.mac || p.serial || p.port)} · прошивка <code>${t}</code> прямо с роутера</small>${body}</div></div>`;
+    return `<div class="wzfw"><div style="flex:1"><b>Плата в USB роутера</b><small class="muted">${esc(p.board?.mac || p.serial || p.port)} · прошивка <code>${t}</code> прямо с роутера</small>${partial}${body}</div></div>`;
   }
   async function usbFlash(i) {
     const b = W.plan[i];
     try {
-      await api('/api/usb/flash', { json: { port: b.usb, target: fwTarget(b) } });
+      await api('/api/usb/flash', { json: { port: b.usb, target: usbTarget(b) } });
       // While the library builds the image, ask again until it is there.
       const wait = async () => {
         await new Promise((ok) => setTimeout(ok, 4000));
