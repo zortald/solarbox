@@ -888,7 +888,7 @@
       ? `<p class="small warn">Плата не видит ни одной сети. Если на ней раньше была своя прошивка с сохранённым Wi-Fi, она не сканирует эфир — <a href="#" data-usbflashlink="${i}">прошить заново</a> (настройки платы сотрутся). Или введите сеть вручную: «Другая сеть…».</p>` : '';
     const ap = (wifiFails[b.usb] || 0) >= 2
       ? '<p class="small warn">Не выходит дважды. Другой способ: плата раздаёт точку <code>solarbox-XXXX</code> — подключитесь к ней с телефона и выберите сеть там; плата появится ниже сама.</p>' : '';
-    return `<div class="wzrow"><label class="wzf"><span>Wi-Fi для платы</span><select id="wz-wifissid">
+    return `<div class="wzrow"><label class="wzf"><span>Wi-Fi для платы — сети, которые видит сама плата: ${n.length}</span><select id="wz-wifissid">
         <option value="">— выберите сеть —</option>
         ${n.map((x) => `<option value="${esc(x.ssid)}" ${!other && x.ssid === W.wifi.ssid ? 'selected' : ''}>${esc(x.ssid)} · ${x.rssi} дБм${x.secured ? '' : ' · открытая'}</option>`).join('')}
         <option value="\u0000other" ${other ? 'selected' : ''}>Другая сеть…</option></select>
