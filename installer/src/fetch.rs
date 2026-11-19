@@ -5,7 +5,7 @@ use serde_json::Value;
 use std::time::Duration;
 
 pub const RELAY: &str = "https://get.solarbox.workers.dev";
-const PUBKEY: &str = include_str!("../../deploy/signing-key.pub");
+const PUBKEY: &str = include_str!("../../server/signing-key.pub");
 
 pub fn verify(data: &[u8], sig: &[u8]) -> bool {
     use base64::Engine;

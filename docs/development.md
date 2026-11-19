@@ -71,7 +71,7 @@ the same port as plain ingest), `router.rs` (RouterOS REST), `changes.rs`
   are built when first asked for and kept in the release.
 - `.github/workflows/build.yml` builds one artifact (`kind`, `arch`,
   `version`), signs every file with ed25519 (secret `SB_SIGNING_KEY`, public
-  key `deploy/signing-key.pub`) and uploads it, signature last. Run by hand:
+  key `server/signing-key.pub`) and uploads it, signature last. Run by hand:
   `gh workflow run build.yml -f kind=server -f arch=armv5 -f version=v0.1.0`.
 - `relay/` is the Cloudflare Worker in front of it (`GET /v1/server/<arch>`):
   built → links, not yet → starts the build. Tests: `node --test relay/test.mjs`.
@@ -84,7 +84,7 @@ the same port as plain ingest), `router.rs` (RouterOS REST), `changes.rs`
   --ssh-port … --lan-ip <CHR's address> --solarbox-url …`; unattended runs:
   `--user <login> --yes` with `SOLARBOX_ROUTER_PASSWORD`.
 - Verify a file: `openssl pkeyutl -verify -pubin -inkey <pem> -rawin -in <file> -sigfile <file>.sig`
-  (the PEM is `deploy/signing-key.pub` with the ed25519 SPKI prefix).
+  (the PEM is `server/signing-key.pub` with the ed25519 SPKI prefix).
 
 ## Conventions
 

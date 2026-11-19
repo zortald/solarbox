@@ -22,6 +22,7 @@ mod router;
 mod sysinfo;
 mod telegram;
 mod tls;
+mod library;
 mod tz;
 mod wizard;
 
@@ -254,6 +255,7 @@ async fn main() {
         .route("/api/board/:name/ping", get(boards::ping))
         .route("/api/board/:name/entity", get(boards::entity))
         .route("/api/board/:name/action", post(boards::action))
+        .route("/api/board/:name/update", post(library::update))
         .route(
             "/api/board/:name/ota",
             post(boards::flash).layer(DefaultBodyLimit::max(8 * 1024 * 1024)),

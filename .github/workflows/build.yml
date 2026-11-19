@@ -1,7 +1,7 @@
 # On-demand build: one artifact for one release, started by the build relay
 # (or by hand). Already in the release → nothing to do. Otherwise build on a
 # runner of the right OS, then sign (ed25519, SB_SIGNING_KEY; public key in
-# deploy/signing-key.pub) and upload on Linux, creating the release from the
+# server/signing-key.pub) and upload on Linux, creating the release from the
 # tag if needed. The run name is what the relay matches to see a build
 # already running.
 name: build

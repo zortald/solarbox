@@ -16,7 +16,9 @@
         <a class="btn" href="http://${esc(b.host)}${b.web_port !== 80 ? ':' + b.web_port : ''}/" target="_blank" rel="noopener">Веб платы ↗</a>
       </div>
       <div class="ota adm-only">
-        <label>Прошивка (.bin из <code>esphome compile</code>, файл <code>firmware.bin</code> / <code>*.ota.bin</code>):</label>
+        <button class="btn" data-lib>Обновить прошивку</button>
+        <span class="muted small">свежая сборка Solarbox для этой платы, подпись проверяется</span>
+        <label>Или своим файлом (.bin из <code>esphome compile</code>, <code>firmware.bin</code> / <code>*.ota.bin</code>):</label>
         <input type="file" accept=".bin" data-file>
         <button class="btn" data-flash>Прошить</button>
         <div class="muted" data-otamsg></div>
@@ -91,15 +93,51 @@
     }
   }
 
+  // Firmware from the release library: Solarbox fetches the board's image
+  // (built on demand the first time), checks the signature and flashes it.
+  async function fromLibrary(name, el) {
+    if (!requireAdmin()) return;
+    if (flashing) return toast('Уже идёт прошивка другой платы', true);
+    const ui = BOARDS[name];
+    if (!(await SB.ask(`Обновить прошивку «${ui.title}» до свежей сборки Solarbox?\n\nПлата перезагрузится, настройки (Wi-Fi, BMS) сохранятся.`, { ok: 'Обновить' }))) return;
+    const msg = el.querySelector('[data-otamsg]');
+    flashing = true;
+    el.querySelectorAll('button').forEach((b) => (b.disabled = true));
+    const before = SB.T[name] || 0;
+    try {
+      let r;
+      for (let k = 0; k < 80; k++) {
+        msg.textContent = k ? 'Прошивка собирается (≈3–5 мин, один раз для всех таких плат)…' : 'Получаю прошивку и загружаю на плату… до минуты, не закрывайте страницу.';
+        r = await api(`/api/board/${name}/update`, { json: {} });
+        if (r.status !== 'building') break;
+        await new Promise((res) => setTimeout(res, 15000));
+      }
+      if (!r.ok) throw new Error('сборка идёт слишком долго');
+      msg.textContent = `✔ Прошивка ${r.target} ${r.version} залита. Жду, когда плата вернётся…`;
+      for (let i = 0; i < 40; i++) {
+        await new Promise((res) => setTimeout(res, 3000));
+        if ((SB.T[name] || 0) > before + 5) { msg.textContent = `✔ ${r.target} ${r.version}: плата вернулась и шлёт данные.`; probe(name); break; }
+        if (i === 39) msg.textContent = '✔ Прошивка залита, но плата пока не прислала данных — проверьте через минуту.';
+      }
+    } catch (e) {
+      msg.textContent = '✘ ' + e.message;
+      toast('Обновление не удалось: ' + e.message, true);
+    } finally {
+      flashing = false;
+      el.querySelectorAll('button').forEach((b) => (b.disabled = false));
+    }
+  }
+
   async function load() {
     try { list = (await api('/api/boards')).boards; } catch (e) { list = []; }
     $('#boards').innerHTML = list.length ? list.map(card).join('')
-      : '<div class="empty">Платы не настроены на сервере (SOLARBOX_BOARDS).</div>';
+      : '<div class="empty">Плат пока нет — подключите их в <a href="/wizard.html">мастере настройки</a>.</div>';
     for (const b of list) {
       const el = document.getElementById('bd-' + b.name);
       el.querySelector('[data-ping]').onclick = () => probe(b.name);
       el.querySelector('[data-restart]').onclick = () => restart(b.name);
       el.querySelector('[data-flash]').onclick = () => flash(b.name, el);
+      el.querySelector('[data-lib]').onclick = () => fromLibrary(b.name, el);
       probe(b.name);
     }
     built = true;
