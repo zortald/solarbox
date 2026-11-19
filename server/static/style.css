@@ -278,3 +278,74 @@ input[type=date], input[type=month] { color-scheme: dark; }
 #page-stats .stab th, #page-stats .stab td { padding: 3px 5px; }
 #page-stats .stab + p { margin: 6px 0 0; font-size: 11px; }
 #sd-facts .w2 { grid-column: span 2; }
+
+/* setup wizard */
+body.wz main { max-width: 640px; }
+.wzsteps { padding: 0 14px 10px; }
+.wzbar { display: flex; gap: 4px; }
+.wzbar span { flex: 1; height: 4px; border-radius: 2px; background: var(--line); }
+.wzbar span.done { background: var(--ok); } .wzbar span.on { background: var(--accent); }
+.wzcap { font-size: 12px; margin-top: 6px; }
+.wzdemo { background: rgba(227,179,65,.12); border: 1px solid #6b5520; color: var(--warn); border-radius: 10px; padding: 8px 12px; font-size: 12px; margin-bottom: 12px; }
+.wzhero { text-align: center; padding: 22px 18px; }
+.wzhero p { margin: 8px 0; }
+.wzh { font-size: 20px; text-transform: none; letter-spacing: 0; color: var(--fg); margin: 10px 0; }
+.wzgap { margin-top: 18px; }
+.wzform { display: grid; gap: 12px; }
+.wzform h2, .wzform p { margin-bottom: 0; } .wzform p { margin-top: 0; }
+.wzf { display: grid; gap: 4px; font-size: 13px; }
+.wzf input, .wzf select { width: 100%; max-width: none; background: var(--bg); color: var(--fg); border: 1px solid var(--line); border-radius: 8px; padding: 10px; font: inherit; font-size: 16px; color-scheme: dark; }
+.wzrow { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; align-items: start; }
+.wzpick { display: flex; gap: 10px; align-items: flex-start; padding: 10px 0; border-top: 1px solid var(--line); cursor: pointer; }
+.wzpick:first-of-type { border-top: 0; }
+.wzpick input { width: 20px; height: 20px; margin: 1px 0 0; accent-color: var(--accent); flex: none; }
+.wzpick span { display: grid; gap: 2px; } .wzpick small { font-size: 12px; }
+.wzpick.dim { opacity: .5; }
+.wzboard details { border-top: 1px solid var(--line); padding: 8px 0; }
+.wzboard summary { color: var(--fg); font-weight: 600; padding: 4px 0; }
+.wzboard h3 { color: var(--fg); border-top: 1px solid var(--line); padding-top: 12px; }
+.wzlist { margin: 6px 0; padding-left: 20px; display: grid; gap: 6px; }
+.wznew { display: flex; gap: 10px; align-items: center; justify-content: space-between; flex-wrap: wrap; background: rgba(78,163,255,.1); border: 1px solid #1f5a8a; border-radius: 10px; padding: 10px 12px; }
+.wzchecks { display: grid; gap: 4px; font-size: 13px; }
+.wzsum { text-align: left; margin: 14px 0; }
+.wznav { display: flex; justify-content: space-between; gap: 10px; margin: 14px 0 calc(10px + env(safe-area-inset-bottom)); }
+.wznav .btn { padding: 12px 20px; font-size: 15px; min-width: 110px; }
+.wznav #wz-next { margin-left: auto; }
+.spin { display: inline-block; width: 12px; height: 12px; border: 2px solid var(--line); border-top-color: var(--accent); border-radius: 50%; margin-right: 8px; vertical-align: -1px; animation: spin .8s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+.wsvg { width: 100%; max-width: 460px; display: block; margin: 8px auto; }
+.wbox { fill: var(--panel2); stroke: var(--line); stroke-width: 1.5; }
+.wtit { fill: var(--fg); font-size: 13px; font-weight: 600; }
+.wlab { fill: var(--muted); font-size: 10.5px; } .wlab.nc { opacity: .4; }
+.wpin { fill: var(--fg); } .wpin.nc { opacity: .3; }
+.wire { fill: none; stroke-width: 2.5; stroke-linejoin: round; }
+.wire.pwr { stroke: var(--bad); } .wire.gnd { stroke: var(--muted); } .wire.tx { stroke: var(--accent); } .wire.rx { stroke: var(--ok); }
+.wzbrow { display: flex; gap: 10px; align-items: flex-start; padding: 8px 0; border-top: 1px solid var(--line); }
+.wzbrow:first-of-type { border-top: 0; }
+.wzbrow > span:last-child { display: grid; gap: 2px; } .wzbrow small { font-size: 12px; }
+.wznum { flex: none; width: 22px; height: 22px; border-radius: 50%; background: var(--panel2); border: 1px solid var(--line); text-align: center; font-size: 12px; line-height: 20px; }
+.wzhave { display: flex; gap: 10px; align-items: center; justify-content: space-between; padding: 8px 0; border-top: 1px solid var(--line); }
+.wzhave:first-of-type { border-top: 0; }
+.wzhave > span:first-child { display: grid; gap: 2px; } .wzhave small { font-size: 12px; }
+.wzstep { display: flex; align-items: center; gap: 8px; flex: none; }
+.wzstep .btn { width: 36px; height: 36px; padding: 0; font-size: 18px; }
+.wzstep b { min-width: 14px; text-align: center; }
+.wzkit, .wzconn { width: 100%; border-collapse: collapse; font-size: 13px; margin: 6px 0; }
+.wzkit td, .wzconn td, .wzconn th { padding: 6px 4px; border-top: 1px solid var(--line); vertical-align: top; text-align: left; }
+.wzkit td:last-child { color: var(--muted); white-space: nowrap; text-align: right; }
+.wzkit small { display: block; font-size: 11.5px; }
+.wzconn th { color: var(--muted); font-weight: 600; font-size: 11.5px; border-top: 0; }
+.wzconn td:last-child { color: var(--muted); }
+.bsvg { max-width: 420px; }
+.wire.w-pwr { stroke: var(--bad); } .wire.w-gnd { stroke: #c9d1d9; } .wire.w-tx { stroke: var(--accent); } .wire.w-rx { stroke: var(--ok); }
+.bpcb { fill: #12324a; stroke: #2a5878; stroke-width: 1.5; }
+.bmod { fill: #9aa4ae; } .bmodt { fill: #1d2632; font-size: 9px; font-weight: 600; }
+.busb { fill: #c9d1d9; }
+.bpad { fill: #d4a72c; stroke: #8a6a10; } .bpad.w-pwr { fill: var(--bad); } .bpad.w-gnd { fill: #c9d1d9; } .bpad.w-tx { fill: var(--accent); } .bpad.w-rx { fill: var(--ok); }
+.blab { fill: #b6c2cf; font-size: 10px; font-family: ui-monospace, Menlo, monospace; } .blab.on { font-weight: 700; font-size: 11px; }
+.blab.w-pwr { fill: var(--bad); } .blab.w-gnd { fill: var(--fg); } .blab.w-tx { fill: var(--accent); } .blab.w-rx { fill: var(--ok); }
+.btag { fill: var(--fg); font-size: 9.5px; }
+.wcol { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 4px; vertical-align: -1px; background: linear-gradient(90deg, var(--c) 50%, var(--s, var(--c)) 50%); border: 1px solid var(--line); }
+.rj { fill: #d8dee4; stroke: #8b98a8; }
+.wire.tp { stroke-width: 3; } .wire.tps { stroke: #fff; stroke-width: 1.4; stroke-dasharray: 4 4; }
+.wzvp { margin-top: 6px; } .wzvp .btn { font-size: 12px; padding: 6px 8px; }
