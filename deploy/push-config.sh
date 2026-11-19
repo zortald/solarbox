@@ -1,6 +1,6 @@
 #!/bin/sh
 # Replace config.json on a running solarbox (validated server-side, live).
-#   SB_ADMIN=<emergency password> ./deploy/push-config.sh [file]   # default deploy/site-config.json
+#   SB_ADMIN=<emergency password> ./deploy/push-config.sh [file]   # default deploy/site-config.json (local, not committed; see site-config.example.json)
 set -e
 [ -f "$(dirname "$0")/local.env" ] && . "$(dirname "$0")/local.env"
 : "${SB_ADMIN:?set SB_ADMIN to the solarbox emergency password}"

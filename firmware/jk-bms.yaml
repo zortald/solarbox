@@ -232,7 +232,13 @@ interval:
             wifi.connected:
           then:
             - http_request.post:
-                url: http://192.168.88.1:8080/api/ingest
+                # Solarbox runs on the Wi-Fi gateway (the site router).
+                url: !lambda |-
+                  esp_netif_ip_info_t ip;
+                  esp_netif_get_ip_info(esp_netif_get_handle_from_ifkey("WIFI_STA_DEF"), &ip);
+                  char gw[16];
+                  esp_ip4addr_ntoa(&ip.gw, gw, sizeof gw);
+                  return std::string("http://") + gw + ":8080/api/ingest";
                 request_headers:
                   Content-Type: application/json
                 json: |-
