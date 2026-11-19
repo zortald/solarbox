@@ -19,6 +19,8 @@ reordering.
 - Inverter (PI30) settings page; BMS SOC calibration panel
 - Boards: native OTA from the dashboard; boards announce themselves
 - Generic JK BMS board firmware with N slots (generator, compiles; not on hardware)
+- Login with the router's own credentials, self-signed HTTPS on the same port,
+  page «Доступ»: one-click port forward to the internet (docs/remote-access.md)
 
 ## Next
 
@@ -36,8 +38,9 @@ reordering.
    Migration path for boards running site-built firmware.
 5. **Installer for MikroTik** — one-line `/tool fetch` + `/import`, picks the
    image by CPU, guides through device-mode.
-6. **HTTPS + full PWA** — certificate on the router; enables Web Serial
-   flashing straight from the wizard.
+6. **Trusted certificate + full PWA** — HTTPS itself is done (self-signed);
+   a trusted one (e.g. DNS-01 on an own domain) enables PWA install and Web
+   Serial flashing straight from the wizard.
 7. **Releases & versioning** — numbered server and firmware versions,
    «есть обновление» in the UI.
 
