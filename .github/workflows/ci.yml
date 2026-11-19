@@ -1,0 +1,32 @@
+# Checks on every push: server tests, the armv5 router build (catches crypto
+# backends that don't build there), JS syntax, generated firmware up to date.
+name: ci
+on: [push, pull_request]
+
+jobs:
+  server:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: Swatinem/rust-cache@v2
+        with: { workspaces: server }
+      - run: cargo test --release
+        working-directory: server
+
+  armv5:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: cross-compile for armv5 (EN7562CT routers)
+        run: docker run --rm -v "$PWD/server":/src -w /src messense/rust-musl-cross:armv5te-musleabi cargo build --release
+
+  ui-firmware:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      - name: JS syntax
+        run: for f in server/static/*.js firmware/*.js; do node --check "$f" || exit 1; done
+      - name: jk-ble.yaml matches its generator
+        run: python3 firmware/gen-jk-ble.py && git diff --exit-code firmware/jk-ble.yaml
