@@ -207,6 +207,8 @@ pub struct Status {
     pub wan_list: bool,
     /// Our forwarding rules: (id, external port, disabled).
     pub rules: Vec<(String, u16, bool)>,
+    /// A rule of ours still in the old form (WAN only, not from the LAN).
+    pub old_rule: bool,
 }
 
 impl Status {
@@ -249,6 +251,7 @@ pub fn status(c: &Cred) -> Result<Status, String> {
     for r in list(&format!("/ip/firewall/nat?comment={NAT_COMMENT}"), c)? {
         if let Ok(p) = s(&r, "dst-port").parse() {
             st.rules.push((s(&r, ".id").to_string(), p, s(&r, "disabled") == "true"));
+            st.old_rule |= s(&r, "dst-address-type") != "local";
         }
     }
     Ok(st)
@@ -256,25 +259,25 @@ pub fn status(c: &Cred) -> Result<Status, String> {
 
 /// RouterOS commands that open access (also shown for pasting by hand).
 pub fn open_commands(port: u16, to: &str) -> String {
-    format!("/ip/cloud/set ddns-enabled=yes\n/ip/firewall/nat/add chain=dstnat in-interface-list=WAN protocol=tcp dst-port={port} action=dst-nat to-addresses={to} to-ports=8080 comment={NAT_COMMENT}")
+    format!("/ip/cloud/set ddns-enabled=yes\n/ip/firewall/nat/add chain=dstnat dst-address-type=local protocol=tcp dst-port={port} action=dst-nat to-addresses={to} to-ports=8080 comment={NAT_COMMENT}")
 }
 
 pub fn close_commands() -> String {
     format!("/ip/firewall/nat/remove [find comment={NAT_COMMENT}]")
 }
 
-/// Open access on `port` with a person's credentials.
+/// Open access on `port` with a person's credentials. The rule matches
+/// anything addressed to the router itself rather than "came in on WAN", so
+/// the public address and the DDNS name also work from the site's own LAN
+/// (no hairpin masquerade needed: the container is not on the LAN subnet).
 pub fn open(admin: &Cred, port: u16) -> Result<(), String> {
     let to = own_ip().ok_or("не удалось узнать адрес контейнера")?.to_string();
-    if list("/interface/list?name=WAN", admin)?.is_empty() {
-        return Err("на роутере нет списка интерфейсов WAN".into());
-    }
     call("POST", "/ip/cloud/set", admin, Some(serde_json::json!({ "ddns-enabled": "yes" })))?;
     for r in list(&format!("/ip/firewall/nat?comment={NAT_COMMENT}"), admin)? {
         call("DELETE", &format!("/ip/firewall/nat/{}", s(&r, ".id")), admin, None)?;
     }
     call("PUT", "/ip/firewall/nat", admin, Some(serde_json::json!({
-        "chain": "dstnat", "action": "dst-nat", "in-interface-list": "WAN", "protocol": "tcp",
+        "chain": "dstnat", "action": "dst-nat", "dst-address-type": "local", "protocol": "tcp",
         "dst-port": port.to_string(), "to-addresses": to, "to-ports": "8080", "comment": NAT_COMMENT,
     })))?;
     Ok(())

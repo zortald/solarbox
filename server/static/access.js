@@ -26,7 +26,8 @@
       `<p class="small">Роутеру нужно одно правило: оно пускает solarbox только к REST роутера и больше никуда. Вставьте в терминал роутера (Winbox → New Terminal) и обновите страницу:</p><pre>${esc(d.cmd_firewall)}</pre>` : '');
     else if (port) state = `<p><span class="dot ok"></span><b>Открыт</b> — порт ${port}</p>` +
       urls.map((u) => `<div class="frow"><code>${esc(u)}</code><span></span><button class="btn xs" data-copy="${esc(u)}">Копировать</button></div>`).join('') +
-      (s.ddns_name ? '<p class="muted small">Если IP у провайдера меняется, заходите по имени — оно не меняется.</p>' : '');
+      (s.ddns_name ? '<p class="muted small">Если IP у провайдера меняется, заходите по имени — оно не меняется.</p>' : '') +
+      (s.old_rule ? '<p class="small bad">Правило старого вида: по этим адресам заходит только снаружи, из Wi-Fi объекта — нет. Нажмите «Обновить правило» (порт останется тот же).</p>' : '');
     else if (s.grey) state = `<p><span class="dot bad"></span><b>Невозможен</b></p><p class="small">У роутера нет белого адреса (WAN: ${esc(s.wan.join(', '))}): провайдер или роутер выше по сети делает NAT, и проброс отсюда не сработает. Попросите у провайдера белый IP или заходите через MikroTik Back To Home.</p>`;
     else state = `<p><span class="dot"></span><b>Закрыт</b>${s.public_ip ? ` — внешний адрес ${esc(s.public_ip)}` : ''}</p>`;
 
@@ -34,6 +35,7 @@
       <div class="panel"><h2>Доступ из интернета</h2>${state}
         <div class="row">
           ${s && !port && !s.grey ? '<button class="btn on" id="ac-open">Открыть доступ</button>' : ''}
+          ${s && port && s.old_rule ? '<button class="btn on" id="ac-fix">Обновить правило</button>' : ''}
           ${s && port ? '<button class="btn danger" id="ac-close">Закрыть доступ</button>' : ''}
           ${!d.service && !d.cmd_firewall ? '<button class="btn" id="ac-svc">Подключить к роутеру</button>' : ''}
         </div>
@@ -62,6 +64,7 @@
       try { await navigator.clipboard.writeText(b.dataset.copy); toast('Скопировано'); } catch (e) { toast(b.dataset.copy); }
     }));
     if ($('#ac-open')) $('#ac-open').onclick = () => change('open', 'Открыть доступ к solarbox из интернета?');
+    if ($('#ac-fix')) $('#ac-fix').onclick = () => change('open', null);
     if ($('#ac-close')) $('#ac-close').onclick = () => change('close', 'Закрыть доступ из интернета?');
     if ($('#ac-svc')) $('#ac-svc').onclick = () => change('service', null);
     $('#ac-all').onclick = async () => {

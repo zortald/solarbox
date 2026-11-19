@@ -67,10 +67,13 @@ All changes on the router are confirmed with the logged-in user's router
 password, which is used once and forgotten.
 
 - **Open:** enable `/ip/cloud ddns-enabled=yes`, pick a random external port in
-  20000–60000, add `/ip/firewall/nat` `chain=dstnat in-interface-list=WAN
+  20000–60000, add `/ip/firewall/nat` `chain=dstnat dst-address-type=local
   protocol=tcp dst-port=<port> action=dst-nat to-addresses=<container ip>
   to-ports=8080 comment=solarbox-access`. The default MikroTik firewall already
-  accepts dst-nat'ed traffic.
+  accepts dst-nat'ed traffic. `dst-address-type=local` (not
+  `in-interface-list=WAN`) so the public address and DDNS name work from the
+  site's own Wi-Fi too; no hairpin masquerade is needed because the container
+  is on its own subnet, not the LAN.
 - **Close:** remove the rule(s) with that comment. DDNS and the certificate stay.
 - **No public IP** (WAN address in 10/8, 172.16/12, 192.168/16, 100.64/10):
   the page says forwarding is impossible and points to Back To Home.

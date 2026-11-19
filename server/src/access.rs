@@ -214,7 +214,7 @@ pub async fn get(State(st): State<AppState>, h: HeaderMap) -> Response {
             v["status"] = serde_json::json!({
                 "wan": s.wan, "wan_list": s.wan_list, "cloud_ip": s.cloud_ip, "ddns_enabled": s.ddns_enabled,
                 "ddns_name": s.ddns_name, "public_ip": s.public_ip(), "grey": s.grey(), "open_port": s.open_port(),
-                "rules": s.rules.len(),
+                "rules": s.rules.len(), "old_rule": s.old_rule,
             });
         }
         Err(e) => {
@@ -267,9 +267,6 @@ pub async fn open(State(st): State<AppState>, h: HeaderMap, Json(b): Json<Confir
         let s = router::status(&c)?;
         if s.grey() {
             return Err(format!("у роутера нет белого адреса (WAN: {}) — провайдер или роутер выше по сети делает NAT, проброс отсюда не сработает. Для себя можно пользоваться Back To Home.", s.wan.join(", ")));
-        }
-        if !s.wan_list {
-            return Err("на роутере нет списка интерфейсов WAN — без него правило не к чему привязать".into());
         }
         if st2.access.service().is_none() {
             let _ = st2.access.make_service(&c);
